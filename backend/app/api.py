@@ -131,7 +131,17 @@ def _approval_response(approval: Approval) -> ApprovalResponse:
     )
 
 
-@router.post("/tasks", response_model=TaskResponse, status_code=status.HTTP_201_CREATED)
+@router.post(
+    "/tasks",
+    response_model=TaskResponse,
+    status_code=status.HTTP_201_CREATED,
+    summary="Create a local task record",
+    description=(
+        "Creates a task and local budget record only. It does not charge a card, "
+        "call a paid provider, reserve real funds, or make a purchase. Omit "
+        "userId and budgetId for the local demo user and task budget."
+    ),
+)
 def create_task(payload: CreateTaskRequest, request: Request, db: Session = Depends(get_db)) -> TaskResponse:
     user = db.get(User, payload.user_id) if payload.user_id else _demo_user(db)
     if user is None:

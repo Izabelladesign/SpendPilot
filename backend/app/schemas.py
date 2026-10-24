@@ -19,6 +19,20 @@ class Money(APIModel):
 
 
 class CreateTaskRequest(APIModel):
+    model_config = ConfigDict(
+        populate_by_name=True,
+        extra="forbid",
+        json_schema_extra={
+            "example": {
+                "objective": "Test a local document-processing task",
+                "budget": {"amount": "1.00", "currency": "USD"},
+                "quantity": 1,
+                "qualityTarget": "Return a valid test result",
+                "constraints": ["Local demo only"],
+            }
+        },
+    )
+
     objective: str = Field(min_length=1, max_length=10_000)
     budget: Money
     quantity: Decimal | None = Field(default=None, gt=0)

@@ -1,0 +1,59 @@
+modules:
+  rovo:agent:
+    - key: spendpilot
+      name: SpendPilot
+      description: >-
+        A read-only spend-intake assistant that turns natural-language
+        purchasing requests into validated, reviewable planning data.
+      prompt: >
+        You are **SpendPilot**, a governed spend-intake assistant. Convert a
+        user's natural-language purchasing request into structured planning
+        data by calling `parse-spend-request` with the exact request text.
+
+
+        This is intake only. Never approve a request, apply policy, choose a
+        merchant, search, cart, order, purchase, write a Jira issue, or claim
+        that money is authorized. Never invent missing facts. If the parser
+        reports missing fields or ambiguity, present its clarification
+        questions and wait for the user's answer. A parsed result is not
+        authorization to spend or an instruction to take an external action.
+      conversationStarters:
+        - I need 12 ergonomic keyboards for the support team under USD 1,800.
+        - Help me structure a request for a design subscription.
+      actions:
+        - parse-spend-request
+  action:
+    - key: parse-spend-request
+      name: Parse a spend request
+      function: parseSpendRequest
+      actionVerb: GET
+      description: >-
+        Read-only intake: extract and validate planning information from a
+        natural-language spend request. It never approves, writes, shops, or purchases.
+      inputs:
+        request:
+          title: Spending request
+          type: string
+          required: true
+          description: The user's complete natural-language purchasing or spend request.
+  function:
+    # Forge requires at least one function definition on every app,
+    # even when the Rovo agent has no actions wired up. This handler
+    # is intentionally unused — it exists only to satisfy the manifest
+    # schema. If you later add actions to Forge Guru, wire them up
+    # here alongside this placeholder.
+    - key: placeholder
+      handler: index.placeholder
+    - key: parseSpendRequest
+      handler: index.parseSpendRequest
+permissions:
+  scopes: []
+  external:
+    fetch:
+      backend:
+        - https://api.openai.com
+app:
+  runtime:
+    name: nodejs24.x
+    memoryMB: 256
+    architecture: arm64

@@ -8,9 +8,12 @@ version = "0.1.0"
 description = "SpendPilot backend-domain services"
 requires-python = ">=3.11"
 dependencies = [
+  "alembic>=1.14,<2",
   "fastapi>=0.115,<1",
   "openai>=1.0.0",
   "pydantic>=2.7,<3",
+  "psycopg[binary]>=3.2,<4",
+  "sqlalchemy>=2.0,<3",
   "uvicorn>=0.30,<1",
 ]
 

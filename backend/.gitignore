@@ -1,7 +1,21 @@
+# Environment variables and secrets
+.env
+.env.*
+!.env.example
+
+# Virtual environments
 .venv/
+venv/
+
+# Python caches
+__pycache__/
+*.py[cod]
 .pytest_cache/
 .mypy_cache/
 .ruff_cache/
-__pycache__/
-*.py[cod]
-.env
+
+# Local databases
+*.db
+*.db-shm
+*.db-wal
+*.db-journal

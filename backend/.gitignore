@@ -1,15 +1,18 @@
-
-# Local secrets
+# Environment variables and secrets
 .env
 .env.*
 !.env.example
 
-# Python
+# Virtual environments
 .venv/
 venv/
+
+# Python caches
 __pycache__/
-*.pyc
+*.py[cod]
 .pytest_cache/
+.mypy_cache/
+.ruff_cache/
 
 # Local databases
 *.db

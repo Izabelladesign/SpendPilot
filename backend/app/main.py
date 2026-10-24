@@ -23,7 +23,9 @@ app = FastAPI(title="SpendPilot x402 API")
 
 initialize_database()
 initialize_budget_database()
-app.include_router(payment_router)
+
+for route in payment_router.routes:
+    app.router.routes.append(route)
 
 NETWORK = "eip155:84532"
 PAY_TO = os.getenv("EVM_ADDRESS")
@@ -69,8 +71,9 @@ app.add_middleware(
 
 
 @app.get("/health")
-async def health():
-    return {"status": "healthy"}
+async def health() -> dict[str, str]:
+    """Provide a readiness check for local development."""
+    return {"status": "ok"}
 
 
 @app.get("/paid-api")

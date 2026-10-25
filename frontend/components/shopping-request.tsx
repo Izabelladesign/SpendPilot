@@ -14,7 +14,10 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Slider } from "@/components/ui/slider";
 import { Textarea } from "@/components/ui/textarea";
-import { mockProducts, type MockProduct } from "@/lib/mock-products";
+import {
+  mockProducts,
+  type MockProduct,
+} from "@/lib/mock-products";
 import { cn } from "cn";
 
 const API_URL =
@@ -27,7 +30,11 @@ const TRAITS = [
   { id: "verified-merchant", label: "Verified merchants only" },
 ] as const;
 
-const STEPS = ["Parsing task", "Checking policy", "Authorizing"] as const;
+const STEPS = [
+  "Parsing task",
+  "Checking policy",
+  "Authorizing",
+] as const;
 
 type Phase = "idle" | "loading" | "results" | "error";
 
@@ -80,7 +87,8 @@ export function ShoppingRequest() {
 
   const [products, setProducts] = useState<MockProduct[]>([]);
   const [submittedRequest, setSubmittedRequest] = useState("");
-  const [submittedBudget, setSubmittedBudget] = useState<number | null>(null);
+  const [submittedBudget, setSubmittedBudget] =
+    useState<number | null>(null);
   const [submittedTraits, setSubmittedTraits] = useState<string[]>([]);
   const [governance, setGovernance] =
     useState<GovernanceReview | null>(null);
@@ -92,6 +100,7 @@ export function ShoppingRequest() {
     for (const id of timers.current) {
       clearTimeout(id);
     }
+
     timers.current = [];
   }
 
@@ -161,7 +170,9 @@ export function ShoppingRequest() {
 
     timers.current.push(
       setTimeout(() => {
-        if (requestVersion.current === version) setStage(1);
+        if (requestVersion.current === version) {
+          setStage(1);
+        }
       }, 500),
     );
 
@@ -175,11 +186,18 @@ export function ShoppingRequest() {
           : "Buying constraints: No additional buying rules specified.",
       ].join("\n");
 
-      const parserResponse = await fetch(`${API_URL}/api/tasks/parse`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ raw_task: rawTask }),
-      });
+      const parserResponse = await fetch(
+        `${API_URL}/api/tasks/parse`,
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            raw_task: rawTask,
+          }),
+        },
+      );
 
       if (!parserResponse.ok) {
         throw new Error(
@@ -187,18 +205,23 @@ export function ShoppingRequest() {
         );
       }
 
-      const result = (await parserResponse.json()) as ParserResponse;
+      const result =
+        (await parserResponse.json()) as ParserResponse;
 
-      if (requestVersion.current !== version) return;
+      if (requestVersion.current !== version) {
+        return;
+      }
 
       if (!result.is_ready_for_next_step) {
         clearTimers();
         setStage(-1);
         setPhase("error");
+
         setError(
           result.clarification_questions?.join(" ") ||
             "The AI needs more information before continuing.",
         );
+
         return;
       }
 
@@ -233,7 +256,9 @@ export function ShoppingRequest() {
         `${API_URL}/api/governance/review`,
         {
           method: "POST",
-          headers: { "Content-Type": "application/json" },
+          headers: {
+            "Content-Type": "application/json",
+          },
           body: JSON.stringify({
             objective: parsed.objective,
             budget_usd: amount.toFixed(2),
@@ -251,17 +276,18 @@ export function ShoppingRequest() {
         );
       }
 
-      const rawReview = (await governanceResponse.json()) as {
-        status:
-          | GovernanceStatus
-          | "APPROVED"
-          | "DENIED"
-          | "REVIEW_REQUIRED";
-        reason: string;
-        proposed_budget_usd: string;
-        requires_human_approval: boolean;
-        payment_authorized: boolean;
-      };
+      const rawReview =
+        (await governanceResponse.json()) as {
+          status:
+            | GovernanceStatus
+            | "APPROVED"
+            | "DENIED"
+            | "REVIEW_REQUIRED";
+          reason: string;
+          proposed_budget_usd: string;
+          requires_human_approval: boolean;
+          payment_authorized: boolean;
+        };
 
       let normalizedStatus: GovernanceStatus;
 
@@ -274,16 +300,20 @@ export function ShoppingRequest() {
       } else {
         normalizedStatus = rawReview.status;
       }
-      
+
       const review: GovernanceReview = {
         ...rawReview,
         status: normalizedStatus,
       };
 
-      if (requestVersion.current !== version) return;
+      if (requestVersion.current !== version) {
+        return;
+      }
 
       if (!["ALLOW", "BLOCK", "REVIEW"].includes(review.status)) {
-        throw new Error("Unexpected governance review response.");
+        throw new Error(
+          "Unexpected governance review response.",
+        );
       }
 
       if (review.payment_authorized !== false) {
@@ -293,15 +323,21 @@ export function ShoppingRequest() {
       }
 
       clearTimers();
+
       setGovernance(review);
 
-      // Sample products only. Live inventory is not connected yet.
+      // These remain sample options for demonstrating the governed
+      // company-spend interface. No purchase is executed here.
       setProducts(mockProducts(text, amount, quality));
+
       setPhase("results");
     } catch (err) {
-      if (requestVersion.current !== version) return;
+      if (requestVersion.current !== version) {
+        return;
+      }
 
       clearTimers();
+
       setStage(-1);
       setPhase("error");
       setGovernance(null);
@@ -355,9 +391,11 @@ export function ShoppingRequest() {
         <Card>
           <CardHeader>
             <CardTitle>Request for the agent</CardTitle>
+
             <CardDescription>
-              Define the business task and security boundaries. The agent
-              can act autonomously only within the authority granted here.
+              Define the business task and security boundaries. The
+              agent can act autonomously only within the authority
+              granted here.
             </CardDescription>
           </CardHeader>
 
@@ -420,7 +458,8 @@ export function ShoppingRequest() {
                 </div>
 
                 <p className="text-xs text-muted-foreground">
-                  Transactions above this limit are blocked by policy.
+                  Transactions above this limit are blocked by
+                  policy.
                 </p>
               </div>
 
@@ -465,7 +504,8 @@ export function ShoppingRequest() {
 
                 <div className="flex flex-wrap gap-2">
                   {TRAITS.map((trait) => {
-                    const selected = traits.includes(trait.id);
+                    const selected =
+                      traits.includes(trait.id);
 
                     return (
                       <Button
@@ -473,10 +513,14 @@ export function ShoppingRequest() {
                         type="button"
                         size="sm"
                         variant={
-                          selected ? "default" : "outline"
+                          selected
+                            ? "default"
+                            : "outline"
                         }
                         aria-pressed={selected}
-                        onClick={() => toggleTrait(trait.id)}
+                        onClick={() =>
+                          toggleTrait(trait.id)
+                        }
                       >
                         {trait.label}
                       </Button>
@@ -496,14 +540,18 @@ export function ShoppingRequest() {
                 >
                   {STEPS.map((label, index) => {
                     const reached = stage >= index;
+
                     const current =
-                      phase === "loading" && stage === index;
+                      phase === "loading" &&
+                      stage === index;
 
                     return (
                       <li
                         key={label}
                         aria-current={
-                          current ? "step" : undefined
+                          current
+                            ? "step"
+                            : undefined
                         }
                       >
                         <div
@@ -560,7 +608,9 @@ export function ShoppingRequest() {
             <Card>
               <CardHeader>
                 <div className="flex flex-wrap items-center justify-between gap-3">
-                  <CardTitle>Spending Governance</CardTitle>
+                  <CardTitle>
+                    Spending Governance
+                  </CardTitle>
 
                   <Badge
                     variant={
@@ -594,9 +644,12 @@ export function ShoppingRequest() {
                     <dt className="text-sm text-muted-foreground">
                       Proposed budget
                     </dt>
+
                     <dd className="text-lg font-semibold">
                       {money.format(
-                        Number(governance.proposed_budget_usd),
+                        Number(
+                          governance.proposed_budget_usd,
+                        ),
                       )}
                     </dd>
                   </div>
@@ -605,6 +658,7 @@ export function ShoppingRequest() {
                     <dt className="text-sm text-muted-foreground">
                       Approval status
                     </dt>
+
                     <dd className="font-medium">
                       {governance.status === "ALLOW"
                         ? "No review required"
@@ -618,14 +672,20 @@ export function ShoppingRequest() {
                     <dt className="text-sm text-muted-foreground">
                       Payment authorized
                     </dt>
-                    <dd className="font-medium">No</dd>
+
+                    <dd className="font-medium">
+                      No
+                    </dd>
                   </div>
 
                   <div>
                     <dt className="text-sm text-muted-foreground">
                       Funds reserved
                     </dt>
-                    <dd className="font-medium">No</dd>
+
+                    <dd className="font-medium">
+                      No
+                    </dd>
                   </div>
                 </dl>
 
@@ -634,28 +694,30 @@ export function ShoppingRequest() {
                 </p>
 
                 <p className="text-xs text-muted-foreground">
-                  This is a preliminary governance review. No payment
-                  has been initiated.
+                  This is a preliminary governance review.
+                  No payment has been initiated.
                 </p>
               </CardContent>
             </Card>
           </section>
         ) : null}
 
-        {phase === "results" && submittedBudget !== null ? (
+        {phase === "results" &&
+        submittedBudget !== null ? (
           <section
             aria-live="polite"
             className="flex flex-col gap-3"
           >
             <div>
               <h2 className="text-lg font-medium">
-                Options inside the cap
+                Company purchase options
               </h2>
 
               <p className="text-sm text-muted-foreground">
-                For “{submittedRequest}”. Each displayed sample
-                price is at or under{" "}
-                {money.format(submittedBudget)}.
+                Sample options for “{submittedRequest}” within
+                the agent&apos;s{" "}
+                {money.format(submittedBudget)} spending
+                authority.
               </p>
             </div>
 
@@ -667,7 +729,10 @@ export function ShoppingRequest() {
                   );
 
                   return trait ? (
-                    <Badge key={id} variant="secondary">
+                    <Badge
+                      key={id}
+                      variant="secondary"
+                    >
                       {trait.label}
                     </Badge>
                   ) : null;
@@ -682,9 +747,12 @@ export function ShoppingRequest() {
                 >
                   <Card size="sm">
                     <CardHeader>
-                      <CardTitle>{product.name}</CardTitle>
+                      <CardTitle>
+                        {product.name}
+                      </CardTitle>
+
                       <CardDescription>
-                        Merchant · {product.merchant}
+                        Provider · {product.merchant}
                       </CardDescription>
                     </CardHeader>
 
@@ -694,7 +762,7 @@ export function ShoppingRequest() {
                       </p>
 
                       <Badge variant="outline">
-                        Inside cap
+                        Within authority
                       </Badge>
                     </CardContent>
                   </Card>
@@ -703,17 +771,18 @@ export function ShoppingRequest() {
             </ul>
 
             <p className="text-xs text-muted-foreground">
-              Sample options for review. Live search is not
-              connected, prices are per item, and no payment is
-              taken. Multiple units may exceed the total request
-              budget.
+              Demonstration options only. Live provider
+              discovery is not connected on this page and no
+              transaction is initiated from these results.
             </p>
           </section>
         ) : null}
       </div>
 
       <aside className="rounded-xl bg-card p-4 text-sm ring-1 ring-foreground/10">
-        <p className="font-medium">Active guardrails</p>
+        <p className="font-medium">
+          Active guardrails
+        </p>
 
         <dl className="mt-4 flex flex-col gap-4">
           <div className="flex flex-col gap-3">
@@ -726,6 +795,7 @@ export function ShoppingRequest() {
                 <span className="text-muted-foreground">
                   Authorized
                 </span>
+
                 <span className="font-medium">
                   {capReady
                     ? money.format(cap)
@@ -737,6 +807,7 @@ export function ShoppingRequest() {
                 <span className="text-muted-foreground">
                   Proposed
                 </span>
+
                 <span className="font-medium">
                   {proposedSpend !== null
                     ? money.format(proposedSpend)
@@ -766,7 +837,8 @@ export function ShoppingRequest() {
                 </div>
               ) : null}
 
-              {proposedSpend !== null && capReady ? (
+              {proposedSpend !== null &&
+              capReady ? (
                 <div className="pt-1">
                   <div className="h-2 overflow-hidden rounded-full bg-muted">
                     <div
@@ -805,7 +877,10 @@ export function ShoppingRequest() {
             <dt className="text-muted-foreground">
               Buying policy
             </dt>
-            <dd>{preferenceLabel(quality)}</dd>
+
+            <dd>
+              {preferenceLabel(quality)}
+            </dd>
           </div>
 
           <div>
@@ -819,7 +894,8 @@ export function ShoppingRequest() {
                     .map(
                       (id) =>
                         TRAITS.find(
-                          (trait) => trait.id === id,
+                          (trait) =>
+                            trait.id === id,
                         )?.label,
                     )
                     .filter(Boolean)
@@ -848,7 +924,10 @@ export function ShoppingRequest() {
             <dt className="text-muted-foreground">
               Payment
             </dt>
-            <dd>Not authorized by governance review</dd>
+
+            <dd>
+              Not authorized by governance review
+            </dd>
           </div>
         </dl>
       </aside>

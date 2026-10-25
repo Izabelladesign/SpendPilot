@@ -17,6 +17,7 @@ from app import persistent_budget_service as budgets
 from app.database import get_db
 from app.models import Budget, PurchaseRequest, Task
 from app.payment_auth import require_payment_operator
+from app.governed_x402_service import execute_governed_x402
 from app.policy_engine import SpendingPolicy
 from app.shared_payment_service import (
     PaymentPreparationError,
@@ -246,4 +247,238 @@ def prepare_payment(
         "payment_id": result.payment_id,
         "status": result.status,
         "message": result.message,
+    }
+
+
+class GovernedX402ExecutionRequest(BaseModel):
+    idempotency_key: str = Field(min_length=1, max_length=200)
+    resource_url: str = "http://127.0.0.1:8001/paid-resource"
+
+
+@router.post("/payments/execute-x402")
+async def execute_x402_payment_route(
+    payload: GovernedX402ExecutionRequest,
+    operator: str = Depends(require_payment_operator),
+):
+    """Execute an already-READY governed-ledger payment once."""
+    try:
+        result = await execute_governed_x402(
+            idempotency_key=payload.idempotency_key,
+            resource_url=payload.resource_url,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except Exception as exc:
+        # Avoid returning exception details that could expose secrets.
+        raise HTTPException(
+            status_code=502,
+            detail=f"Governed execution failed: {type(exc).__name__}",
+        ) from exc
+
+    return {
+        "status": result.status,
+        "message": result.message,
+        "idempotency_key": result.idempotency_key,
+        "http_status": result.http_status,
+    }
+
+
+@router.post("/payments/execute-purchase-x402")
+async def execute_approved_purchase_x402(
+    purchase_request_id: str,
+    operator: str = Depends(require_payment_operator),
+    db: Session = Depends(get_db),
+):
+    """Execute an approved shared purchase through governed x402."""
+    from decimal import Decimal
+    from sqlalchemy import update
+    from app.models import (
+        Approval, Budget, BudgetReservation, Payment,
+        PurchaseRequest, Task,
+    )
+    from app.payment_store import connect
+    from app.vendor_verifier import TRUSTED_VENDORS
+    from app.governed_x402_service import execute_governed_x402
+
+    purchase = db.get(PurchaseRequest, purchase_request_id)
+    if purchase is None:
+        raise HTTPException(404, "Purchase request not found")
+
+    shared_payment = (
+        db.query(Payment)
+        .filter_by(purchase_request_id=purchase.id)
+        .one_or_none()
+    )
+    if shared_payment is None:
+        raise HTTPException(409, "Prepare the shared payment first")
+
+    task = db.get(Task, purchase.task_id)
+    if task is None or task.budget_id is None:
+        raise HTTPException(409, "Purchase task has no budget")
+
+    approval = (
+        db.query(Approval)
+        .filter_by(purchase_request_id=purchase.id)
+        .one_or_none()
+    )
+    if (
+        approval is None
+        or approval.status != "APPROVED"
+        or approval.decided_by is None
+        or approval.decided_at is None
+    ):
+        raise HTTPException(409, "Explicit human approval is required")
+
+    if shared_payment.status not in {"READY", "PAID"}:
+        raise HTTPException(409, "Shared payment is not ready")
+
+    provider = purchase.provider
+    if provider is None or not provider.is_approved:
+        raise HTTPException(409, "Provider is not approved")
+
+    # Fail closed: only a vendor explicitly present in the trusted
+    # registry may be charged. Do not infer trust from a display name.
+    vendor_name = provider.metadata_json.get("x402_vendor_name", "")
+    if vendor_name not in TRUSTED_VENDORS:
+        raise HTTPException(
+            409,
+            "Provider needs a trusted x402_vendor_name in its metadata",
+        )
+
+    amount = Decimal(purchase.amount)
+    if (
+        purchase.currency != "USD"
+        or amount <= 0
+        or amount != Decimal(shared_payment.amount)
+        or shared_payment.task_id != task.id
+        or shared_payment.provider_id != provider.id
+    ):
+        raise HTTPException(409, "Purchase and payment details do not match")
+
+    budget = db.get(Budget, task.budget_id)
+    reservation = (
+        db.query(BudgetReservation)
+        .filter_by(purchase_request_id=purchase.id)
+        .one_or_none()
+    )
+    if (
+        budget is None
+        or reservation is None
+        or reservation.status != "ACTIVE"
+        or reservation.budget_id != budget.id
+        or Decimal(reservation.amount) != amount
+    ):
+        raise HTTPException(409, "Active matching budget reservation required")
+
+    # A stable key binds retries to this exact shared payment.
+    key = f"shared-payment:{shared_payment.id}"
+
+    # The persistent ledger must already have its own budget for this
+    # task. Do not silently create or double-reserve one here.
+    from app import persistent_budget_service as persistent_budgets
+    from app.unified_payment_service import prepare_governed_payment
+    from app.policy_engine import PaymentRequest, SpendingPolicy
+
+    persistent_budget = persistent_budgets.get_budget(task.id)
+    if persistent_budget is None:
+        raise HTTPException(
+            409,
+            "Persistent governed budget missing; reconcile budget setup first",
+        )
+
+    policy = SpendingPolicy(
+        task_id=task.id,
+        allowed_vendors=frozenset({vendor_name}),
+        max_transaction_usd=amount,
+        approval_threshold_usd=amount,
+    )
+    governed = prepare_governed_payment(
+        idempotency_key=key,
+        request=PaymentRequest(
+            task_id=task.id,
+            vendor=vendor_name,
+            amount_usd=amount,
+        ),
+        policy=policy,
+    )
+    if governed.status not in {"READY", "PAID"}:
+        return {
+            "status": governed.status,
+            "message": governed.message,
+            "idempotency_key": key,
+            "purchase_request_id": purchase.id,
+        }
+
+    # Use the exact resource path allowed by the governed service.
+    try:
+        result = await execute_governed_x402(
+            idempotency_key=key,
+            resource_url="http://127.0.0.1:8001/paid-resource",
+        )
+    except ValueError as exc:
+        raise HTTPException(409, str(exc)) from exc
+
+    # Never mark the shared payment paid from an HTTP success alone.
+    if result.status != "PAID":
+        return {
+            "status": result.status,
+            "message": result.message,
+            "idempotency_key": key,
+            "purchase_request_id": purchase.id,
+        }
+
+    # Get the transaction hash that the governed verifier recorded.
+    with connect() as conn:
+        row = conn.execute(
+            "SELECT transaction_hash FROM verified_settlements "
+            "WHERE idempotency_key = ?",
+            (key,),
+        ).fetchone()
+
+    if row is None:
+        raise HTTPException(
+            409,
+            "Settlement needs reconciliation; no verified hash recorded",
+        )
+    tx_hash = row[0]
+
+    # Synchronize shared accounting in one SQLAlchemy transaction.
+    try:
+        if reservation.status == "ACTIVE":
+            changed = db.execute(
+                update(Budget)
+                .where(
+                    Budget.id == budget.id,
+                    Budget.reserved >= amount,
+                )
+                .values(
+                    reserved=Budget.reserved - amount,
+                    spent=Budget.spent + amount,
+                )
+                .execution_options(synchronize_session=False)
+            )
+            if changed.rowcount != 1:
+                raise ValueError("Shared budget reconciliation failed")
+
+            reservation.status = "COMMITTED"
+
+        shared_payment.status = "PAID"
+        shared_payment.transaction_reference = tx_hash
+        db.commit()
+    except Exception:
+        db.rollback()
+        # The on-chain settlement may already be final. Do not retry
+        # the transfer; reconcile the shared database using the same key.
+        raise HTTPException(
+            409,
+            "On-chain settlement verified; shared accounting needs reconciliation",
+        )
+
+    return {
+        "status": "PAID",
+        "message": "Settlement verified; shared budget committed",
+        "purchase_request_id": purchase.id,
+        "payment_id": shared_payment.id,
+        "idempotency_key": key,
+        "transaction_hash": tx_hash,
     }

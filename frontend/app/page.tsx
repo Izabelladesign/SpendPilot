@@ -14,18 +14,26 @@ export default function Home() {
       </h1>
 
       <p className="max-w-2xl text-lg text-muted-foreground">
-        SpendPilot is a security layer for autonomous purchasing agents.
-        Define what an agent is allowed to buy, how much it can spend, and
-        which vendors it can trust. SpendPilot enforces those boundaries
-        before money moves.
+        SpendPilot is an agentic purchasing control room for companies.
+        It researches products and services, recommends the best fit,
+        enforces spending limits before money moves, and helps teams find
+        unused access after the purchase.
       </p>
 
-      <Link
-        href="/shopping"
-        className={cn(buttonVariants({ size: "lg" }), "w-fit")}
-      >
-        Test the guardrails
-      </Link>
+      <div className="flex flex-wrap gap-3">
+        <Link
+          href="/enterprise"
+          className={cn(buttonVariants({ size: "lg" }), "w-fit")}
+        >
+          Open the company control room
+        </Link>
+        <Link
+          href="/shopping"
+          className={cn(buttonVariants({ size: "lg", variant: "outline" }), "w-fit")}
+        >
+          Test the guardrails
+        </Link>
+      </div>
     </main>
   );
 }

@@ -91,6 +91,20 @@ class ExecuteTaskRequest(APIModel):
     idempotency_key: str = Field(alias="idempotencyKey", min_length=1, max_length=255)
 
 
+class ResearchBriefVerificationRequest(APIModel):
+    summary: str = Field(min_length=1, max_length=50_000)
+    copilot_section: str = Field(alias="copilotSection", min_length=1, max_length=50_000)
+    cursor_section: str = Field(alias="cursorSection", min_length=1, max_length=50_000)
+    pricing_section: str = Field(alias="pricingSection", min_length=1, max_length=50_000)
+    security_section: str = Field(alias="securitySection", min_length=1, max_length=50_000)
+    source_urls: list[str] = Field(alias="sourceUrls", max_length=20)
+    unverified_information: str = Field(
+        alias="unverifiedInformation",
+        min_length=1,
+        max_length=50_000,
+    )
+
+
 class BudgetResponse(APIModel):
     id: str
     name: str
@@ -112,6 +126,19 @@ class PaymentResponse(APIModel):
     currency: str
     status: str
     transaction_reference: str | None = Field(alias="transactionReference")
+    created_at: datetime = Field(alias="createdAt")
+    updated_at: datetime = Field(alias="updatedAt")
+
+
+class PurchaseRequestStatusResponse(APIModel):
+    id: str
+    task_id: str = Field(alias="taskId")
+    provider_id: str = Field(alias="providerId")
+    amount: Decimal
+    currency: str
+    decision: str
+    decision_reason: str = Field(alias="decisionReason")
+    approval_id: str | None = Field(alias="approvalId")
     created_at: datetime = Field(alias="createdAt")
     updated_at: datetime = Field(alias="updatedAt")
 
@@ -139,6 +166,15 @@ class ApprovalResponse(APIModel):
     decided_at: datetime | None = Field(alias="decidedAt")
     created_at: datetime = Field(alias="createdAt")
     updated_at: datetime = Field(alias="updatedAt")
+
+
+class ExecutionSummaryResponse(APIModel):
+    task_id: str = Field(alias="taskId")
+    task_status: str = Field(alias="taskStatus")
+    purchase_requests: list[PurchaseRequestStatusResponse] = Field(alias="purchaseRequests")
+    payments: list[PaymentResponse]
+    approvals: list[ApprovalResponse]
+    events: list[AgentEventResponse]
 
 
 class ErrorBody(APIModel):

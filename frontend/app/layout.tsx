@@ -39,6 +39,12 @@ export default function RootLayout({ children }: LayoutProps<"/">) {
             >
               Shopping
             </Link>
+            <Link
+              href="/enterprise"
+              className="text-sm font-medium text-muted-foreground"
+            >
+              Enterprise
+            </Link>
           </div>
         </header>
         {children}

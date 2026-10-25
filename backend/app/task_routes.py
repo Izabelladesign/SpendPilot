@@ -6,6 +6,7 @@ from app.services.task_parser import (
     TaskParser,
     configured_openai_client,
 )
+
 router = APIRouter(prefix="/api/tasks", tags=["Tasks"])
 
 

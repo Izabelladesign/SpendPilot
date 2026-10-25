@@ -1,6 +1,17 @@
 import type { Metadata } from "next";
+import { Geist, Geist_Mono } from "next/font/google";
 import Link from "next/link";
 import "./globals.css";
+
+const geistSans = Geist({
+  variable: "--font-geist-sans",
+  subsets: ["latin"],
+});
+
+const geistMono = Geist_Mono({
+  variable: "--font-geist-mono",
+  subsets: ["latin"],
+});
 
 export const metadata: Metadata = {
   title: {
@@ -14,7 +25,7 @@ export default function RootLayout({ children }: LayoutProps<"/">) {
   return (
     <html
       lang="en"
-      className="h-full antialiased"
+      className={`${geistSans.variable} ${geistMono.variable} h-full antialiased`}
     >
       <body className="flex min-h-full flex-col">
         <header className="border-b bg-card">
@@ -22,20 +33,25 @@ export default function RootLayout({ children }: LayoutProps<"/">) {
             <Link href="/" className="font-semibold tracking-tight">
               SpendPilot
             </Link>
-            <Link
-              href="/shopping"
-              className="text-sm font-medium text-muted-foreground"
-            >
-              Shopping
-            </Link>
-            <Link
-              href="/enterprise"
-              className="text-sm font-medium text-muted-foreground"
-            >
-              Enterprise
-            </Link>
+
+            <nav className="flex items-center gap-5">
+              <Link
+                href="/shopping"
+                className="text-sm font-medium text-muted-foreground"
+              >
+                Shopping
+              </Link>
+
+              <Link
+                href="/enterprise"
+                className="text-sm font-medium text-muted-foreground"
+              >
+                Enterprise
+              </Link>
+            </nav>
           </div>
         </header>
+
         {children}
       </body>
     </html>

@@ -8,11 +8,18 @@ version = "0.1.0"
 description = "SpendPilot backend-domain services"
 requires-python = ">=3.11"
 dependencies = [
+  "alembic>=1.14,<2",
   "fastapi>=0.115,<1",
   "langgraph>=0.2,<1",
+  "httpx>=0.28,<1",
   "openai>=1.0.0",
   "pydantic>=2.7,<3",
+  "psycopg[binary]>=3.2,<4",
+  "python-dotenv>=1.2,<2",
+  "sqlalchemy>=2.0,<3",
   "uvicorn>=0.30,<1",
+  "web3>=7,<9",
+  "x402>=2.25,<3",
 ]
 
 [tool.hatch.build.targets.wheel]

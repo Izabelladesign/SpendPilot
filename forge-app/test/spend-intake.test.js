@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { parseSpendRequestWithExtractor } from '../src/spend-intake.js';
+import { createJiraSpendRequest } from '../src/jira-spend-request.js';
 
 const completeTask = {
   requestedItemOrService: 'Ergonomic keyboards', purchasingIntent: 'Purchase equipment', quantity: 12,
@@ -41,9 +42,47 @@ test('model refusal and outage return safe actionable failures', async () => {
     assert.equal(result.validationErrors[0].code, code); assert.match(result.clarificationQuestions[0], /retry/i);
   }
 });
-test('parser has no payment, order, database, or Jira-write action', async () => {
+test('parser has no payment, order, database, or Jira-write side effect', async () => {
   let calls = 0;
   const result = await parseSpendRequestWithExtractor({ request: 'Buy keyboards' }, async () => { calls += 1; return completeTask; });
   assert.equal(calls, 1); assert.equal(result.isReadyForNextStep, true);
   assert.deepEqual(Object.keys(result).sort(), ['clarificationQuestions', 'isReadyForNextStep', 'missingFields', 'parsedTask', 'status', 'validationErrors']);
+});
+
+test('Jira action creates a review issue without payment fields', async () => {
+  let request;
+  const result = await createJiraSpendRequest({
+    projectKey: 'SP',
+    summary: 'Review GitHub Copilot versus Cursor',
+    description: 'Compare options for the engineering team.',
+    budget: '1.00 USD',
+    constraints: ['Research only', 'Human approval required'],
+    requestJira: async (path, options) => {
+      request = { path, options };
+      return new Response(JSON.stringify({ id: '10001', key: 'SP-42', self: 'https://jira.example/rest/api/3/issue/10001' }), { status: 201 });
+    },
+  });
+
+  assert.equal(result.status, 'created');
+  assert.equal(result.issueKey, 'SP-42');
+  assert.equal(request.path.value_ || request.path, '/rest/api/3/issue');
+  const body = JSON.parse(request.options.body);
+  assert.equal(body.fields.project.key, 'SP');
+  assert.equal(body.fields.issuetype.name, 'Task');
+  assert.deepEqual(body.fields.labels, ['spendpilot', 'spend-request']);
+  assert.match(body.fields.description.content[0].content[0].text, /Compare options/);
+});
+
+test('Jira action fails safely when Jira rejects the request', async () => {
+  const result = await createJiraSpendRequest({
+    projectKey: 'SP',
+    summary: 'Review request',
+    description: 'Details',
+    budget: '10 USD',
+    requestJira: async () => new Response('{}', { status: 403 }),
+  });
+
+  assert.equal(result.status, 'jira_error');
+  assert.equal(result.issueKey, null);
+  assert.match(result.message, /permissions/i);
 });

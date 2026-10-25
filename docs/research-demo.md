@@ -111,7 +111,7 @@ This is preliminary governance only and does not authorize or execute payment.
   verified task-specific prices.
 - A real research-service adapter that returns the brief.
 - A real Base Sepolia x402 settlement and on-chain reconciliation.
-- Forge installation and Jira task/approval integration.
+- Forge deployment and installation of the new Jira spend-request action.
 - Public deployment.
 
 The x402 implementation fails closed when credentials or settlement evidence

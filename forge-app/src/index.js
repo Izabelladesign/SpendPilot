@@ -1,10 +1,11 @@
 // Entry point for the SpendPilot Rovo agent.
 //
-// Rovo invokes the agent directly from the rovo:agent module. The parser
-// action below is deliberately read-only: it only returns validated planning
-// data and never talks to Jira or a commerce system.
+// Rovo invokes the agent directly from the rovo:agent module. Intake remains
+// read-only; the Jira action below creates a review issue only after the user
+// explicitly asks for it. Neither action approves or pays for anything.
 
 import { parseSpendRequest as parseRequest } from './spend-intake.js';
+import { createJiraSpendRequest as createJiraIssue } from './jira-spend-request.js';
 
 export const placeholder = async (payload, context) => {
   // Intentionally unused. See the note above.
@@ -20,3 +21,5 @@ export const placeholder = async (payload, context) => {
 // Rovo action inputs arrive flat on the first argument. This deliberately
 // thin handler keeps the parsing contract reusable by future orchestration.
 export const parseSpendRequest = async (payload) => parseRequest(payload);
+
+export const createJiraSpendRequest = async (payload) => createJiraIssue(payload);

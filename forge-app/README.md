@@ -1,9 +1,9 @@
-# SpendPilot Forge intake shell
+# SpendPilot Forge Jira intake
 
-This is the read-only SpendPilot Rovo intake shell. It accepts a natural-language
-spending request, extracts validated planning data, and returns missing fields
-and clarification questions. It does not approve spending, read or write Jira,
-shop, research providers, persist data, or take a payment action.
+This Forge app accepts a natural-language spending request, extracts validated
+planning data, and can create a Jira Task issue for review after the user
+explicitly asks it to do so. It does not approve spending, purchase anything,
+reserve funds, or take a payment action.
 
 ## Local development
 
@@ -15,7 +15,19 @@ npm test
 ```
 
 The parser expects `OPENAI_API_KEY` to be configured as an encrypted Forge
-variable when deployed. Do not place credentials in source or `.env` files.
+variable when deployed. OpenAI API usage may incur charges. Do not place
+credentials in source or `.env` files.
+
+To configure the live parser, set the encrypted Forge variable interactively
+from the `forge-app` directory:
+
+```bash
+forge variables set --encrypt OPENAI_API_KEY
+```
+
+Only do this if the team has approved OpenAI usage and a billing account is
+configured. Jira issue creation does not require a personal Atlassian API
+token; Forge uses the logged-in Jira user and the declared Jira scope.
 
 ## Register and deploy
 
@@ -25,16 +37,19 @@ register this app (or insert the team's registered app ID into `manifest.yml`):
 ```bash
 forge register
 forge deploy
-forge install --demo-site --product jira
+forge install --site https://spendpilot.atlassian.net --product jira
 ```
 
-The manifest includes an external-fetch permission for the OpenAI host. After
-that permission or any future scope change, deploy and run the appropriate
-`forge install --upgrade` command for the team's Jira site.
+The manifest includes an external-fetch permission for the OpenAI host and a
+`write:jira-work` scope for creating review issues. After deploying, upgrade
+the installation so Jira grants the new scope:
+
+```bash
+forge install --upgrade --site https://spendpilot.atlassian.net --product jira
+```
 
 ## Integration boundary
 
-This shell is intentionally temporary as a local intake experience. It must
-later call the shared FastAPI backend's SP-101 parser rather than maintain a
-second parser implementation. Developer 4 owns the final Forge/Jira surface;
-this project must remain read-only until that shared integration is defined.
+The Jira action is intentionally limited to creating a review issue. Approval,
+provider selection, purchase execution, and license management still belong to
+the shared backend and must remain separate authorization steps.

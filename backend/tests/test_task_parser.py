@@ -53,7 +53,30 @@ async def test_complete_request_produces_normalized_valid_task() -> None:
     assert result.status is ParserStatus.COMPLETE
     assert result.parsed_task is not None
     assert result.parsed_task.quantity == 1000
+    assert result.parsed_task.budget is not None
     assert result.parsed_task.budget.currency == "USD"
+
+
+@pytest.mark.asyncio
+async def test_explicit_quantity_unit_and_request_count_are_preserved() -> None:
+    response = {**COMPLETE_TASK, "quantity_unit": "documents", "request_count": 10}
+    result = await TaskParser(FakeStructuredClient(response)).parse(
+        "Process 1,000 documents in 10 requests."
+    )
+
+    assert result.parsed_task is not None
+    assert result.parsed_task.quantity_unit == "documents"
+    assert result.parsed_task.request_count == 10
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("request_count", [0, -1, 1.5, True])
+async def test_invalid_request_count_is_rejected(request_count: Any) -> None:
+    response = {**COMPLETE_TASK, "request_count": request_count}
+    result = await TaskParser(FakeStructuredClient(response)).parse("Process documents.")
+
+    assert result.status is ParserStatus.INVALID_MODEL_OUTPUT
+    assert result.parsed_task is None
 
 
 @pytest.mark.asyncio

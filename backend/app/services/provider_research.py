@@ -44,6 +44,8 @@ class ProviderRecord(BaseModel):
     service_description: str = Field(min_length=1)
     capabilities: list[str] = Field(default_factory=list)
     pricing_model: str | None = None
+    pricing_unit: str | None = None
+    billing_period: str | None = None
     price_estimate: float | None = Field(default=None, ge=0)
     currency: str | None = Field(default=None, pattern=r"^[A-Z]{3}$")
     source_url: str

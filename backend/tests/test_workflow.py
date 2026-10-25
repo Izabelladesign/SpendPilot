@@ -13,8 +13,12 @@ from app.services.provider_research import (
 from app.services.task_parser import Budget, ParsedTask, ParserResult, ParserStatus
 from app.services.workflow import (
     ApprovalStatus,
+    ExecutionResult,
+    ExecutionStatus,
     OptimizerRecommendation,
     SpendPilotWorkflow,
+    VerificationResult,
+    VerificationStatus,
     WorkflowDependencies,
     WorkflowStatus,
 )
@@ -214,7 +218,7 @@ async def test_approved_path_uses_safe_stub_execution_and_verification() -> None
 
     result = await workflow.run("Process 1,000 documents under $50.")
 
-    assert result.status is WorkflowStatus.COMPLETE
+    assert result.status is WorkflowStatus.AWAITING_VERIFICATION
     assert result.approval_status is ApprovalStatus.APPROVED
     assert result.execution_result is not None
     assert result.execution_result.status.value == "stubbed"
@@ -235,3 +239,49 @@ async def test_no_governance_or_execution_is_called_without_explicit_approval() 
     assert optimizer.calls == 1
     assert result.execution_result is None
     assert result.verification_result is None
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "verification_status, expected",
+    [
+        (VerificationStatus.STUBBED, WorkflowStatus.AWAITING_VERIFICATION),
+        (VerificationStatus.FAILED, WorkflowStatus.FAILED),
+        (VerificationStatus.VERIFIED, WorkflowStatus.COMPLETE),
+    ],
+)
+async def test_successful_execution_is_complete_only_after_verification(
+    verification_status: VerificationStatus, expected: WorkflowStatus
+) -> None:
+    class SuccessfulExecution:
+        async def execute(
+            self, task: ParsedTask, recommendation: OptimizerRecommendation
+        ) -> ExecutionResult:
+            return ExecutionResult(
+                status=ExecutionStatus.SUCCEEDED, message="Service reported success."
+            )
+
+    class FakeVerifier:
+        async def verify(
+            self,
+            task: ParsedTask,
+            recommendation: OptimizerRecommendation,
+            execution: ExecutionResult,
+        ) -> VerificationResult:
+            return VerificationResult(
+                status=verification_status, message="Local verification result."
+            )
+
+    workflow = SpendPilotWorkflow(
+        WorkflowDependencies(
+            parser=FakeParser(complete_parser_result()),
+            researcher=FakeResearcher(RESEARCH),
+            optimizer=FakeOptimizer(RECOMMENDATION),
+            governance=FakeGovernance(PolicyResult(Decision.APPROVED, "Approved.")),
+            executor=SuccessfulExecution(),
+            verifier=FakeVerifier(),
+        )
+    )
+    result = await workflow.run("Process 1,000 documents under $50.")
+
+    assert result.status is expected

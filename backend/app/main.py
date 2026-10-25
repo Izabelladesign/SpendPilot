@@ -12,9 +12,11 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
 from app.api import router
+from app.governance_routes import router as governance_router
 from app.payment_routes import router as payment_router
 from app.payment_store import initialize_database
 from app.persistent_budget_service import initialize_budget_database
+from app.task_routes import router as task_router
 
 load_dotenv()
 
@@ -22,25 +24,33 @@ app = FastAPI(title="SpendPilot API", version="0.1.0")
 
 allowed_origins = [
     origin.strip()
-    for origin in os.getenv("CORS_ORIGINS", "http://localhost:3000").split(",")
+    for origin in os.getenv(
+        "CORS_ORIGINS",
+        "http://localhost:3000,http://127.0.0.1:3000",
+    ).split(",")
     if origin.strip()
 ]
 app.add_middleware(
     CORSMiddleware,
     allow_origins=allowed_origins,
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
+    allow_credentials=False,
+    allow_methods=["GET", "POST", "OPTIONS"],
+    allow_headers=["Content-Type"],
 )
 
 initialize_database()
 initialize_budget_database()
+for route in governance_router.routes:
+    app.router.routes.append(route)
 
 # Developer 4 shared task, budget, event, and approval routes.
 app.include_router(router)
 
 # Developer 2 payment/governance routes are namespaced under /api.
 app.include_router(payment_router)
+
+for route in task_router.routes:
+    app.router.routes.append(route)
 
 NETWORK = "eip155:84532"
 PAY_TO = os.getenv("EVM_ADDRESS")

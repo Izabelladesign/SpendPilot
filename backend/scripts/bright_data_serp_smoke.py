@@ -22,7 +22,7 @@ from urllib.error import HTTPError, URLError
 from urllib.parse import urlencode
 from urllib.request import Request, urlopen
 
-DEFAULT_ENDPOINT = "https://api.brightdata.com/serp/req"
+DEFAULT_ENDPOINT = "https://api.brightdata.com/request"
 SMOKE_QUERY = "document processing API providers"
 REQUEST_TIMEOUT_SECONDS = 30
 
@@ -97,13 +97,6 @@ def diagnostic_for_http_error(error: HTTPError) -> str:
     return f"Bright Data request failed: HTTP {error.code}{suffix}."
 
 
-def _request_url(endpoint: str, zone: str, customer: str | None) -> str:
-    query: dict[str, str] = {"zone": zone}
-    if customer:
-        query["customer"] = customer
-    return f"{endpoint}?{urlencode(query)}"
-
-
 def main() -> int:
     """Make exactly one request and print metadata-only diagnostics."""
 
@@ -114,8 +107,6 @@ def main() -> int:
 
     api_key = os.environ.get("BRIGHT_DATA_API_KEY")
     zone = os.environ.get("BRIGHT_DATA_SERP_ZONE")
-    customer = os.environ.get("BRIGHT_DATA_CUSTOMER_ID")
-    endpoint = os.environ.get("BRIGHT_DATA_SERP_ENDPOINT", DEFAULT_ENDPOINT)
     if not api_key:
         print("BRIGHT_DATA_API_KEY is required; no request was made.", file=sys.stderr)
         return 2
@@ -126,12 +117,14 @@ def main() -> int:
     print("Warning: this one live Bright Data request may consume free credits.", file=sys.stderr)
     payload = json.dumps(
         {
-            "country": "us",
-            "multi": [{"query": {"q": SMOKE_QUERY, "num": 10}}],
+            "zone": zone,
+            "url": f"https://www.google.com/search?{urlencode({'q': SMOKE_QUERY})}",
+            "format": "json",
+            "data_format": "parsed_light",
         }
     ).encode("utf-8")
     request = Request(
-        _request_url(endpoint, zone, customer),
+        DEFAULT_ENDPOINT,
         data=payload,
         headers={
             "Authorization": f"Bearer {api_key}",

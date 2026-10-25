@@ -4,6 +4,7 @@ import { useEffect, useMemo, useState } from "react";
 import { Activity, AlertCircle, ArrowUpRight, CheckCircle2, Clock3, RefreshCw, ShieldCheck, Wallet } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { AgentControlCenter } from "@/components/agent-control-center";
 import { EnterpriseIntake } from "@/components/enterprise-intake";
 import {
   Card,
@@ -167,6 +168,13 @@ export function EnterpriseDashboard() {
       </div>
 
       <EnterpriseIntake onTaskUpdated={handleTaskUpdated} />
+
+      <AgentControlCenter
+        task={selectedTask}
+        events={events}
+        verificationStatus={selectedVerification}
+        payments={selectedPayments}
+      />
 
       {error ? (
         <div className="flex items-start gap-3 rounded-xl border border-destructive/30 bg-destructive/10 p-4 text-sm" role="alert">
@@ -364,7 +372,7 @@ export function EnterpriseDashboard() {
         </Card>
       ) : null}
 
-      <p className="flex items-center gap-2 text-xs text-muted-foreground"><ArrowUpRight className="size-3.5" /> Data is read from the local SpendPilot API. Refresh after creating a task in Swagger.</p>
+      <p className="flex items-center gap-2 text-xs text-muted-foreground"><ArrowUpRight className="size-3.5" /> This control room reads the local SpendPilot API. Swagger is available for developers, but the company demo starts with the intake form above.</p>
     </main>
   );
 }

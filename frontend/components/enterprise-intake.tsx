@@ -17,11 +17,11 @@ import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 
 const demoBrief = {
-  summary: "A comparison for a 50-person engineering team.",
-  copilotSection: "GitHub Copilot pricing and security information.",
-  cursorSection: "Cursor pricing and security information.",
-  pricingSection: "Pricing is based on the cited public vendor pages.",
-  securitySection: "Security details require review against current vendor documentation.",
+  summary: "Recommendation: GitHub Copilot is the preferred option for a 50-person engineering team; Cursor remains the comparison alternative.",
+  copilotSection: "GitHub Copilot is the selected product in this local demo because it is treated as the stronger fit for a team-wide managed rollout.",
+  cursorSection: "Cursor is the researched alternative and remains visible for reviewer comparison.",
+  pricingSection: "The local demo compares pricing evidence structurally; it does not claim a live quote or charge a provider.",
+  securitySection: "Security details require review against current vendor documentation before a production purchase.",
   sourceUrls: [
     "https://github.com/features/copilot",
     "https://cursor.com/pricing",
@@ -81,9 +81,9 @@ export function EnterpriseIntake({ onTaskUpdated }: EnterpriseIntakeProps) {
   return (
     <Card>
       <CardHeader>
-        <CardTitle>Start a company research request</CardTitle>
+        <CardTitle>Tell the agent what your company needs</CardTitle>
         <CardDescription>
-          Describe the outcome your team needs. SpendPilot keeps the requirements and budget together before any provider action.
+          Describe the outcome your team needs. SpendPilot researches products and services, recommends one, checks spending limits, and routes the purchase for approval.
         </CardDescription>
       </CardHeader>
       <CardContent className="flex flex-col gap-5">
@@ -113,7 +113,7 @@ export function EnterpriseIntake({ onTaskUpdated }: EnterpriseIntakeProps) {
           </div>
           <Button type="submit" disabled={busy} className="w-fit">
             <Send />
-            {busy ? "Submitting…" : "Create research request"}
+            {busy ? "Starting agent run…" : "Start agent run"}
           </Button>
         </form>
 
@@ -122,7 +122,7 @@ export function EnterpriseIntake({ onTaskUpdated }: EnterpriseIntakeProps) {
             <div className="flex flex-wrap items-center justify-between gap-3">
               <div>
                 <p className="text-sm font-medium">Request submitted</p>
-                <p className="text-xs text-muted-foreground">SpendPilot is ready for the research result.</p>
+                <p className="text-xs text-muted-foreground">The request is captured. Run the safe local scenario to see the recommendation, guardrails, and verification flow.</p>
               </div>
               <Badge variant={task.status === "COMPLETED" ? "default" : "outline"}>
                 {task.status === "COMPLETED" ? <CheckCircle2 /> : <AlertCircle />}
@@ -131,10 +131,10 @@ export function EnterpriseIntake({ onTaskUpdated }: EnterpriseIntakeProps) {
             </div>
             <Button type="button" variant="outline" onClick={() => void runLocalDemoResult()} disabled={busy || task.status === "COMPLETED"} className="w-fit">
               <Play />
-              Run local demo result
+              Run safe local agent simulation
             </Button>
             <p className="text-xs text-muted-foreground">
-              Demo mode uses a local research response fixture. It does not call a provider or execute payment.
+              This demo compares GitHub Copilot and Cursor, chooses Copilot explicitly, and stops before any purchase. It does not call a provider or execute payment.
             </p>
           </div>
         ) : null}

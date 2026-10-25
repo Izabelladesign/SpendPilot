@@ -48,6 +48,7 @@ PENDING
 IN_PROGRESS
 PENDING_RECONCILIATION
 SETTLED
+SIMULATED
 FAILED
 UNCERTAIN
 ```
@@ -208,6 +209,28 @@ Returns chronological agent events:
 
 Response: `200 OK`.
 
+### `GET /tasks/{taskId}/execution`
+
+Returns the read-only execution summary used by the enterprise dashboard. It
+joins the persisted task, purchase-request, approval, payment, and event
+records. Payment state and task state remain separate; a `SETTLED` payment does
+not imply that the task is `COMPLETED`.
+
+Response:
+
+```json
+{
+  "taskId": "uuid",
+  "taskStatus": "VERIFYING",
+  "purchaseRequests": [],
+  "payments": [],
+  "approvals": [],
+  "events": []
+}
+```
+
+Response: `200 OK`.
+
 ### `POST /tasks/{taskId}/execute`
 
 Requests execution of a task. The backend must enforce idempotency and policy
@@ -221,6 +244,64 @@ Request:
 
 Response: `202 Accepted` with the current `Task` resource. Repeating the same
 key must not create a duplicate execution or payment.
+
+### `POST /tasks/{taskId}/verify`
+
+Local demo endpoint for submitting a returned research brief to the
+server-owned verifier. It does not call an external provider or execute a
+payment. The task becomes `COMPLETED` only when verification passes; otherwise
+it becomes `FAILED` and records a `VERIFICATION_FAILED` event.
+
+Request:
+
+```json
+{
+  "summary": "A comparison for a 50-person engineering team.",
+  "copilotSection": "GitHub Copilot information.",
+  "cursorSection": "Cursor information.",
+  "pricingSection": "Pricing information.",
+  "securitySection": "Security information.",
+  "sourceUrls": [
+    "https://github.com/features/copilot",
+    "https://cursor.com/pricing"
+  ],
+  "unverifiedInformation": "Enterprise discounts are not verified."
+}
+```
+
+Response: `200 OK` with the updated `Task` resource and verification result in
+`output.verification`.
+
+### `POST /tasks/{taskId}/demo-run`
+
+Runs the locked Copilot-versus-Cursor enterprise scenario entirely locally.
+The response is the updated `Task` resource. Its `output.demoRun` contains the
+candidate comparison, selected product, rationale, governance state, purchase
+preview, and sample license-health findings. The route also records the agent
+timeline and verifies the included research brief.
+
+This route is idempotent after the first demo run and never calls a provider,
+accesses a vendor account, signs a wallet transaction, or moves money. It
+returns `409 unsupported_demo_scenario` when the task objective is not the
+locked Copilot-versus-Cursor scenario.
+
+### `POST /tasks/{taskId}/demo-purchase-preview`
+
+Creates the local demo's persisted decision packet: a `REVIEW_REQUIRED`
+purchase request and a `PENDING` approval. It is idempotent for the task and
+does not call a provider, reserve real funds, or create a payment.
+
+### `POST /tasks/{taskId}/demo-approve`
+
+Records an `APPROVED` decision for the local demo packet. This route exists only
+to make the human approval gate visible in the no-money demo; it does not
+authorize a live payment.
+
+### `POST /tasks/{taskId}/demo-payment`
+
+Records a `SIMULATED` payment with a `demo-only:` transaction reference after
+the local approval. It does not sign a transaction, call Coinbase/x402, contact
+a provider, reserve funds, or create an on-chain settlement.
 
 ### `GET /budgets/{budgetId}`
 

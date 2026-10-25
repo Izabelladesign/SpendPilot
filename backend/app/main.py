@@ -1,3 +1,4 @@
+from app.coinbase_mcp import router as coinbase_mcp_router
 """SpendPilot FastAPI application entry point.
 
 The shared task API and the Coinbase/x402 payment API are mounted together,
@@ -121,3 +122,5 @@ async def paid_api() -> dict[str, str]:
 
 from app.agent_governance_routes import router as agent_governance_router
 app.include_router(agent_governance_router)
+
+app.include_router(coinbase_mcp_router)

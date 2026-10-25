@@ -17,6 +17,8 @@ from app.models import (
     Approval,
     Budget,
     Payment,
+    Provider,
+    PurchaseRequest,
     Task,
     TaskStatus,
     User,
@@ -32,11 +34,20 @@ from app.schemas import (
     ErrorResponse,
     EventListResponse,
     ExecuteTaskRequest,
+    ExecutionSummaryResponse,
     PaymentListResponse,
     PaymentResponse,
+    PurchaseRequestStatusResponse,
+    ResearchBriefVerificationRequest,
     TaskListResponse,
     TaskResponse,
 )
+from app.services.local_demo import (
+    build_local_demo,
+    is_local_demo_task,
+    verify_local_demo,
+)
+from app.services.research_brief_verifier import verify_research_brief
 
 router = APIRouter()
 
@@ -148,6 +159,23 @@ def _payment_response(payment: Payment) -> PaymentResponse:
         transactionReference=payment.transaction_reference,
         createdAt=payment.created_at,
         updatedAt=payment.updated_at,
+    )
+
+
+def _purchase_request_status_response(
+    purchase: PurchaseRequest,
+) -> PurchaseRequestStatusResponse:
+    return PurchaseRequestStatusResponse(
+        id=purchase.id,
+        taskId=purchase.task_id,
+        providerId=purchase.provider_id,
+        amount=purchase.amount,
+        currency=purchase.currency,
+        decision=purchase.decision,
+        decisionReason=purchase.decision_reason,
+        approvalId=purchase.approval.id if purchase.approval else None,
+        createdAt=purchase.created_at,
+        updatedAt=purchase.updated_at,
     )
 
 
@@ -286,6 +314,61 @@ def get_task_events(
     )
 
 
+@router.get(
+    "/tasks/{task_id}/execution",
+    response_model=ExecutionSummaryResponse,
+    summary="Read the task execution summary",
+)
+def get_task_execution_summary(
+    task_id: str,
+    request: Request,
+    db: Session = Depends(get_db),
+) -> ExecutionSummaryResponse:
+    """Join governance, payment, and event state for dashboard readers.
+
+    This endpoint is deliberately read-only. It reports payment state alongside
+    the task state without treating a settled payment as a successful task.
+    """
+
+    task = _find_task(task_id, db, request)
+    purchase_requests = (
+        db.query(PurchaseRequest)
+        .filter(PurchaseRequest.task_id == task.id)
+        .order_by(PurchaseRequest.created_at.asc())
+        .all()
+    )
+    payments = (
+        db.query(Payment)
+        .filter(Payment.task_id == task.id)
+        .order_by(Payment.created_at.asc())
+        .all()
+    )
+    approvals = (
+        db.query(Approval)
+        .filter(Approval.task_id == task.id)
+        .order_by(Approval.created_at.asc())
+        .all()
+    )
+    events = (
+        db.query(AgentEvent)
+        .filter(AgentEvent.task_id == task.id)
+        .order_by(AgentEvent.created_at.asc())
+        .all()
+    )
+
+    return ExecutionSummaryResponse(
+        taskId=task.id,
+        taskStatus=task.status,
+        purchaseRequests=[
+            _purchase_request_status_response(purchase)
+            for purchase in purchase_requests
+        ],
+        payments=[_payment_response(payment) for payment in payments],
+        approvals=[_approval_response(approval) for approval in approvals],
+        events=[_event_response(event) for event in events],
+    )
+
+
 @router.post(
     "/tasks/{task_id}/execute",
     response_model=TaskResponse,
@@ -341,6 +424,561 @@ def execute_task(
     db.commit()
     db.refresh(task)
 
+    return _task_response(task)
+
+
+@router.post(
+    "/tasks/{task_id}/verify",
+    response_model=TaskResponse,
+    summary="Verify a returned research brief",
+    description=(
+        "Local demo endpoint: runs the server-owned research brief verifier "
+        "and records the result. It does not call a provider or execute payment."
+    ),
+)
+def verify_task_output(
+    task_id: str,
+    payload: ResearchBriefVerificationRequest,
+    request: Request,
+    db: Session = Depends(get_db),
+) -> TaskResponse:
+    """Persist a service response and complete the task only after verification."""
+
+    task = _find_task(task_id, db, request)
+
+    if task.status in {TaskStatus.COMPLETED.value, TaskStatus.FAILED.value}:
+        raise _error(
+            "invalid_state_transition",
+            "A terminal task cannot be verified again.",
+            request,
+            409,
+        )
+
+    task.status = TaskStatus.VERIFYING.value
+    task.output = {
+        "researchBrief": payload.model_dump(by_alias=True),
+    }
+    db.add(
+        AgentEvent(
+            task_id=task.id,
+            event_type="OUTPUT_RECEIVED",
+            message="Research service response received; verification started",
+            metadata_json={"sourceCount": len(payload.source_urls)},
+        )
+    )
+
+    verification = verify_research_brief(
+        summary=payload.summary,
+        copilot_section=payload.copilot_section,
+        cursor_section=payload.cursor_section,
+        pricing_section=payload.pricing_section,
+        security_section=payload.security_section,
+        source_urls=payload.source_urls,
+        unverified_information=payload.unverified_information,
+    )
+    task.output["verification"] = {
+        "status": verification.status.value,
+        "message": verification.message,
+        "checks": verification.checks,
+    }
+
+    if verification.verified:
+        task.status = TaskStatus.COMPLETED.value
+        task.failure_reason = None
+        event_type = "OUTPUT_VERIFIED"
+        event_message = "Research brief verified; task completed"
+    else:
+        task.status = TaskStatus.FAILED.value
+        task.failure_reason = verification.message
+        event_type = "VERIFICATION_FAILED"
+        event_message = "Research brief failed verification; task not completed"
+
+    db.add(
+        AgentEvent(
+            task_id=task.id,
+            event_type=event_type,
+            message=event_message,
+            metadata_json={
+                "verificationStatus": verification.status.value,
+                "checks": verification.checks,
+            },
+        )
+    )
+    db.commit()
+    db.refresh(task)
+
+    return _task_response(task)
+
+
+@router.post(
+    "/tasks/{task_id}/demo-run",
+    response_model=TaskResponse,
+    summary="Run the safe local enterprise demo",
+    description=(
+        "Runs the deterministic Copilot-versus-Cursor enterprise demo. It records "
+        "research candidates, a recommendation, governance state, a purchase "
+        "preview, license findings, and verification without calling a provider "
+        "or moving money."
+    ),
+)
+def run_local_demo(
+    task_id: str,
+    request: Request,
+    db: Session = Depends(get_db),
+) -> TaskResponse:
+    """Persist one idempotent, no-money end-to-end demo run."""
+
+    task = _find_task(task_id, db, request)
+    existing_run = next(
+        (
+            event
+            for event in task.events
+            if event.event_type == "DEMO_RUN_STARTED"
+        ),
+        None,
+    )
+    if existing_run:
+        return _task_response(task)
+
+    if task.status in {TaskStatus.COMPLETED.value, TaskStatus.FAILED.value}:
+        raise _error(
+            "invalid_state_transition",
+            "A terminal task cannot start a local demo run.",
+            request,
+            409,
+        )
+
+    if not is_local_demo_task(task):
+        raise _error(
+            "unsupported_demo_scenario",
+            (
+                "The safe local demo is configured for the default GitHub Copilot "
+                "versus Cursor scenario."
+            ),
+            request,
+            409,
+        )
+
+    output, brief = build_local_demo(task)
+    demo_run = output["demoRun"]
+    governance = demo_run["governance"]
+    recommendation = demo_run["recommendation"]
+
+    task.status = TaskStatus.RESEARCHING.value
+    db.add(
+        AgentEvent(
+            task_id=task.id,
+            event_type="DEMO_RUN_STARTED",
+            message="Local agent run started; no external services are enabled",
+            metadata_json={"mode": "LOCAL_SIMULATION"},
+        )
+    )
+    db.add(
+        AgentEvent(
+            task_id=task.id,
+            event_type="RESEARCH_COMPLETED",
+            message="Compared GitHub Copilot and Cursor",
+            metadata_json={
+                "candidateCount": len(demo_run["candidates"]),
+                "candidates": [candidate["name"] for candidate in demo_run["candidates"]],
+                "evidenceStatus": recommendation["evidenceStatus"],
+            },
+        )
+    )
+    db.add(
+        AgentEvent(
+            task_id=task.id,
+            event_type="RECOMMENDATION_CREATED",
+            message="Recommended GitHub Copilot over Cursor",
+            metadata_json={
+                "selectedProduct": recommendation["selectedProduct"],
+                "alternativeProduct": recommendation["alternativeProduct"],
+                "rationale": recommendation["rationale"],
+            },
+        )
+    )
+    db.add(
+        AgentEvent(
+            task_id=task.id,
+            event_type="POLICY_DECISION",
+            message="Recommendation is gated for human approval",
+            metadata_json={
+                "decision": governance["status"],
+                "budgetCap": governance["budgetCap"],
+                "paymentAuthorized": governance["paymentAuthorized"],
+            },
+        )
+    )
+    db.add(
+        AgentEvent(
+            task_id=task.id,
+            event_type="PURCHASE_PREVIEWED",
+            message="Prepared a governed purchase preview; no funds moved",
+            metadata_json={
+                "executed": False,
+                "fundsMoved": False,
+                "providerCalled": False,
+            },
+        )
+    )
+
+    task.status = TaskStatus.VERIFYING.value
+    task.output = output
+    db.add(
+        AgentEvent(
+            task_id=task.id,
+            event_type="OUTPUT_RECEIVED",
+            message="Local research result received; verification started",
+            metadata_json={"sourceCount": len(brief["sourceUrls"])},
+        )
+    )
+    verification = verify_local_demo(brief)
+    task.output["verification"] = verification
+
+    if verification["status"] == "VERIFIED":
+        task.status = TaskStatus.COMPLETED.value
+        task.failure_reason = None
+        db.add(
+            AgentEvent(
+                task_id=task.id,
+                event_type="OUTPUT_VERIFIED",
+                message="Local agent run verified; task completed",
+                metadata_json={
+                    "verificationStatus": verification["status"],
+                    "checks": verification["checks"],
+                },
+            )
+        )
+    else:
+        task.status = TaskStatus.FAILED.value
+        task.failure_reason = verification["message"]
+        db.add(
+            AgentEvent(
+                task_id=task.id,
+                event_type="VERIFICATION_FAILED",
+                message="Local agent run failed verification",
+                metadata_json={
+                    "verificationStatus": verification["status"],
+                    "checks": verification["checks"],
+                },
+            )
+        )
+
+    db.commit()
+    db.refresh(task)
+    return _task_response(task)
+
+
+@router.post(
+    "/tasks/{task_id}/demo-purchase-preview",
+    response_model=TaskResponse,
+    summary="Create the local demo decision packet",
+    description=(
+        "Creates a persisted, human-reviewable purchase request and approval "
+        "record for the local demo. It does not call a provider, reserve real "
+        "funds, execute x402, or move money."
+    ),
+)
+def create_demo_purchase_preview(
+    task_id: str,
+    request: Request,
+    db: Session = Depends(get_db),
+) -> TaskResponse:
+    """Persist the approval boundary shown by the company-facing demo.
+
+    The local demo used to stop at a JSON purchase preview. This endpoint makes
+    the next product boundary visible in the shared records: a recommendation
+    becomes a purchase request that still needs a human approval. The provider
+    record is explicitly marked as local simulation so this route cannot be
+    mistaken for a live merchant or Coinbase payment.
+    """
+
+    task = _find_task(task_id, db, request)
+    if not is_local_demo_task(task) or not task.output or "demoRun" not in task.output:
+        raise _error(
+            "invalid_state_transition",
+            "Run the safe local demo before creating its approval packet.",
+            request,
+            409,
+        )
+
+    idempotency_key = f"local-demo-purchase-{task.id}"
+    existing = (
+        db.query(PurchaseRequest)
+        .filter_by(task_id=task.id, idempotency_key=idempotency_key)
+        .one_or_none()
+    )
+    if existing:
+        return _task_response(task)
+
+    provider_name = "GitHub Copilot (local demo)"
+    provider = db.query(Provider).filter_by(name=provider_name).one_or_none()
+    if provider is None:
+        provider = Provider(
+            name=provider_name,
+            service_description=(
+                "Deterministic SpendPilot demo provider; no vendor account is accessed."
+            ),
+            is_approved=True,
+            metadata_json={
+                "mode": "LOCAL_SIMULATION",
+                "product": "GitHub Copilot",
+                "paymentEnabled": False,
+            },
+        )
+        db.add(provider)
+        db.flush()
+
+    amount = task.budget.total if task.budget else Decimal("0")
+    if amount <= 0:
+        raise _error(
+            "invalid_budget",
+            "The local demo needs a positive task budget for its illustrative request.",
+            request,
+            422,
+        )
+
+    reason = (
+        "The agent recommendation is ready, but a human must approve the "
+        "illustrative purchase before any real provider or payment connector could run."
+    )
+    purchase = PurchaseRequest(
+        task_id=task.id,
+        provider_id=provider.id,
+        idempotency_key=idempotency_key,
+        amount=amount,
+        currency=task.budget.currency if task.budget else "USD",
+        decision="REVIEW_REQUIRED",
+        decision_reason=reason,
+    )
+    db.add(purchase)
+    db.flush()
+
+    approval = Approval(
+        task_id=task.id,
+        purchase_request_id=purchase.id,
+        amount=purchase.amount,
+        currency=purchase.currency,
+        vendor="GitHub Copilot",
+        status="PENDING",
+        reason=reason,
+    )
+    db.add(approval)
+
+    demo_run = dict(task.output["demoRun"])
+    purchase_preview = dict(demo_run.get("purchase", {}))
+    purchase_preview.update(
+        {
+            "state": "AWAITING_HUMAN_APPROVAL",
+            "executed": False,
+            "fundsMoved": False,
+            "providerCalled": False,
+            "purchaseRequestId": purchase.id,
+            "approvalId": approval.id,
+            "nextStep": "A reviewer must approve this request before payment can be considered.",
+        }
+    )
+    demo_run["purchase"] = purchase_preview
+    output = dict(task.output)
+    output["demoRun"] = demo_run
+    output["decisionPacket"] = {
+        "mode": "LOCAL_SIMULATION",
+        "selectedProduct": "GitHub Copilot",
+        "providerId": provider.id,
+        "purchaseRequestId": purchase.id,
+        "approvalId": approval.id,
+        "approvalStatus": approval.status,
+        "paymentStatus": "NOT_AUTHORIZED",
+        "fundsMoved": False,
+        "message": "Decision packet created for review; no payment was attempted.",
+    }
+    task.output = output
+    task.selected_provider_id = provider.id
+
+    db.add(
+        AgentEvent(
+            task_id=task.id,
+            event_type="PURCHASE_REQUEST_CREATED",
+            message="Created a local decision packet and routed it for human approval",
+            metadata_json={
+                "mode": "LOCAL_SIMULATION",
+                "purchaseRequestId": purchase.id,
+                "approvalId": approval.id,
+                "paymentAuthorized": False,
+                "fundsMoved": False,
+            },
+        )
+    )
+    db.commit()
+    db.refresh(task)
+    return _task_response(task)
+
+
+def _latest_local_demo_purchase(task: Task, db: Session, request: Request) -> PurchaseRequest:
+    purchase = (
+        db.query(PurchaseRequest)
+        .filter_by(task_id=task.id, idempotency_key=f"local-demo-purchase-{task.id}")
+        .one_or_none()
+    )
+    if purchase is None:
+        raise _error(
+            "invalid_state_transition",
+            "Create the local demo approval packet before continuing.",
+            request,
+            409,
+        )
+    return purchase
+
+
+@router.post(
+    "/tasks/{task_id}/demo-approve",
+    response_model=TaskResponse,
+    summary="Approve the local demo request",
+    description=(
+        "Approves the local demo decision packet for presentation purposes only. "
+        "It does not authorize a real payment, access a wallet, or call Coinbase."
+    ),
+)
+def approve_demo_purchase(
+    task_id: str,
+    request: Request,
+    db: Session = Depends(get_db),
+) -> TaskResponse:
+    """Show the human approval gate without requiring reviewer credentials."""
+
+    task = _find_task(task_id, db, request)
+    purchase = _latest_local_demo_purchase(task, db, request)
+    approval = purchase.approval
+    if approval is None:
+        raise _error("invalid_approval", "The demo purchase has no approval record.", request, 409)
+    if approval.status == "APPROVED":
+        return _task_response(task)
+    if approval.status != "PENDING":
+        raise _error(
+            "duplicate_request",
+            "The local demo approval has already been decided.",
+            request,
+            409,
+        )
+
+    reviewer = db.query(User).filter_by(email="reviewer@spendpilot.local").one_or_none()
+    if reviewer is None:
+        reviewer = User(
+            email="reviewer@spendpilot.local",
+            display_name="SpendPilot Demo Reviewer",
+        )
+        db.add(reviewer)
+        db.flush()
+
+    approval.status = "APPROVED"
+    approval.decided_by = reviewer.id
+    approval.decided_at = datetime.now(timezone.utc)
+    purchase.decision = "APPROVED"
+    task.output = dict(task.output or {})
+    packet = dict(task.output.get("decisionPacket", {}))
+    packet["approvalStatus"] = "APPROVED"
+    packet["paymentStatus"] = "NOT_AUTHORIZED"
+    packet["message"] = (
+        "Human approval recorded in local simulation; payment is still not authorized."
+    )
+    task.output["decisionPacket"] = packet
+
+    db.add(
+        AgentEvent(
+            task_id=task.id,
+            event_type="APPROVAL_DECIDED",
+            message="Demo reviewer approved the decision packet; payment remains simulated",
+            metadata_json={
+                "approvalId": approval.id,
+                "decision": "APPROVED",
+                "mode": "LOCAL_SIMULATION",
+                "paymentAuthorized": False,
+            },
+        )
+    )
+    db.commit()
+    db.refresh(task)
+    return _task_response(task)
+
+
+@router.post(
+    "/tasks/{task_id}/demo-payment",
+    response_model=TaskResponse,
+    summary="Simulate the local Coinbase payment step",
+    description=(
+        "Records a clearly labeled local payment simulation after demo approval. "
+        "It does not sign a transaction, call x402, contact Coinbase, reserve "
+        "funds, or move money."
+    ),
+)
+def simulate_demo_payment(
+    task_id: str,
+    request: Request,
+    db: Session = Depends(get_db),
+) -> TaskResponse:
+    """Complete the visible payment stage without creating a blockchain payment."""
+
+    task = _find_task(task_id, db, request)
+    purchase = _latest_local_demo_purchase(task, db, request)
+    approval = purchase.approval
+    if approval is None or approval.status != "APPROVED":
+        raise _error(
+            "approval_required",
+            "The local demo request must be approved before payment simulation.",
+            request,
+            409,
+        )
+    if purchase.payment is not None:
+        return _task_response(task)
+
+    payment = Payment(
+        task_id=task.id,
+        purchase_request_id=purchase.id,
+        provider_id=purchase.provider_id,
+        amount=purchase.amount,
+        currency=purchase.currency,
+        status="SIMULATED",
+        transaction_reference=f"demo-only:{task.id}",
+    )
+    db.add(payment)
+    task.output = dict(task.output or {})
+    packet = dict(task.output.get("decisionPacket", {}))
+    packet["approvalStatus"] = approval.status
+    packet["paymentStatus"] = "SIMULATED_NO_FUNDS"
+    packet["fundsMoved"] = False
+    packet["transactionReference"] = payment.transaction_reference
+    packet["message"] = "Payment stage simulated for the demo; no chain transaction exists."
+    task.output["decisionPacket"] = packet
+    demo_run = dict(task.output.get("demoRun", {}))
+    purchase_preview = dict(demo_run.get("purchase", {}))
+    purchase_preview.update(
+        {
+            "state": "SIMULATED_NO_FUNDS",
+            "executed": False,
+            "fundsMoved": False,
+            "providerCalled": False,
+            "transactionReference": payment.transaction_reference,
+            "nextStep": "Production would verify settlement and the delivered outcome here.",
+        }
+    )
+    demo_run["purchase"] = purchase_preview
+    task.output["demoRun"] = demo_run
+
+    db.add(
+        AgentEvent(
+            task_id=task.id,
+            event_type="PAYMENT_SIMULATED",
+            message="Coinbase/x402 payment stage simulated; no funds moved",
+            metadata_json={
+                "mode": "LOCAL_SIMULATION",
+                "paymentId": payment.id,
+                "transactionReference": payment.transaction_reference,
+                "fundsMoved": False,
+            },
+        )
+    )
+    db.commit()
+    db.refresh(task)
     return _task_response(task)
 
 

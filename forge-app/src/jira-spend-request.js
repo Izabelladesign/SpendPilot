@@ -1,4 +1,5 @@
 import api, { route } from '@forge/api';
+import { request as httpRequest } from 'node:http';
 
 const toText = (value) => (typeof value === 'string' ? value.trim() : '');
 const LOCAL_DEMO_BACKEND_URL = 'http://127.0.0.1:8000';
@@ -20,6 +21,24 @@ const parseBudget = (value) => {
 };
 
 const isLoopbackUrl = (value) => /^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?(?:\/|$)/i.test(value);
+
+const requestLocalBackend = (url, options = {}) => new Promise((resolve, reject) => {
+  const target = new URL(url);
+  const request = httpRequest(target, {
+    method: options.method || 'GET',
+    headers: options.headers || {},
+  }, (response) => {
+    const chunks = [];
+    response.on('data', (chunk) => chunks.push(chunk));
+    response.on('end', () => resolve(new Response(Buffer.concat(chunks), {
+      status: response.statusCode || 502,
+      headers: response.headers,
+    })));
+  });
+  request.on('error', reject);
+  if (options.body) request.write(options.body);
+  request.end();
+});
 
 const documentText = (node) => {
   if (!node || typeof node !== 'object') return '';
@@ -53,7 +72,7 @@ const syncWithBackend = async ({
     return backendUnavailable('Backend sync skipped because the budget format could not be parsed.');
   }
 
-  const request = requestBackend || (isLoopbackUrl(normalizedUrl) ? globalThis.fetch : api.fetch);
+  const request = requestBackend || (isLoopbackUrl(normalizedUrl) ? requestLocalBackend : api.fetch);
   if (typeof request !== 'function') {
     return backendUnavailable('Backend sync is unavailable in this Forge runtime.');
   }

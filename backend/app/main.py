@@ -8,6 +8,7 @@ from app.payment_routes import router as payment_router
 from app.task_routes import router as task_router
 from app.payment_store import initialize_database
 from app.persistent_budget_service import initialize_budget_database
+from app.governance_routes import router as governance_router
 
 from x402.http import (
     HTTPFacilitatorClient,
@@ -32,6 +33,8 @@ app.add_middleware(
 
 initialize_database()
 initialize_budget_database()
+for route in governance_router.routes:
+    app.router.routes.append(route)
 
 for route in payment_router.routes:
     app.router.routes.append(route)

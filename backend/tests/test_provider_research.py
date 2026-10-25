@@ -178,7 +178,7 @@ async def test_bright_data_expect_element_failure_is_safe_and_not_retried() -> N
 
 
 @pytest.mark.asyncio
-async def test_bright_data_client_normalizes_one_mocked_serp_response(
+async def test_bright_data_client_normalizes_mocked_body_wrapped_serp_response(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """The concrete client makes one injected request and returns public evidence only."""
@@ -190,7 +190,7 @@ async def test_bright_data_client_normalizes_one_mocked_serp_response(
     def request_once(request: Request, timeout: float) -> tuple[int, bytes, dict[str, str]]:
         requests.append(request)
         assert timeout > 0
-        body = {
+        serp_body = {
             "organic": [
                 {
                     "title": "Acme Document API",
@@ -198,6 +198,11 @@ async def test_bright_data_client_normalizes_one_mocked_serp_response(
                     "snippet": "Document processing API with pricing details",
                 }
             ]
+        }
+        body = {
+            "status_code": 200,
+            "headers": {"content-type": "application/json"},
+            "body": json.dumps(serp_body),
         }
         return (
             200,
@@ -211,6 +216,14 @@ async def test_bright_data_client_normalizes_one_mocked_serp_response(
 
     assert len(requests) == 1
     assert requests[0].method == "POST"
+    assert requests[0].full_url == "https://api.brightdata.com/request"
+    request_payload = json.loads(requests[0].data.decode("utf-8"))
+    assert request_payload == {
+        "zone": "test-zone",
+        "url": "https://www.google.com/search?q=Process+documents+provider+pricing",
+        "format": "json",
+        "data_format": "parsed_light",
+    }
     assert result.providers[0].provider_name == "Acme Document API"
     assert result.providers[0].source_url == "https://acme.example/pricing"
     assert result.providers[0].price_estimate is None
@@ -221,7 +234,7 @@ def _raise_bright_data_502() -> tuple[int, bytes, dict[str, str]]:
     headers = Message()
     headers["x-brd-error-code"] = "expect_element"
     raise HTTPError(
-        "https://api.brightdata.com/serp/req",
+        "https://api.brightdata.com/request",
         502,
         "Bad Gateway",
         headers,

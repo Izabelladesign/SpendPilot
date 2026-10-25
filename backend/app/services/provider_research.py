@@ -15,7 +15,7 @@ from datetime import UTC, datetime
 from enum import StrEnum
 from typing import Any, Callable, Mapping, Protocol
 from urllib.error import HTTPError, URLError
-from urllib.parse import urlparse
+from urllib.parse import urlencode, urlparse
 from urllib.request import Request, urlopen
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator
@@ -105,7 +105,7 @@ class ResearchUnavailableError(Exception):
 
 BrightDataRequest = Callable[[Request, float], tuple[int, bytes, Mapping[str, str]]]
 
-_BRIGHT_DATA_SERP_ENDPOINT = "https://api.brightdata.com/serp/req"
+_BRIGHT_DATA_SERP_ENDPOINT = "https://api.brightdata.com/request"
 _BRIGHT_DATA_TIMEOUT_SECONDS = 20.0
 
 
@@ -157,10 +157,16 @@ class BrightDataSerpClient:
             )
 
         query = self._build_query(task)
+        google_search_url = f"https://www.google.com/search?{urlencode({'q': query})}"
         request = Request(
-            f"{_BRIGHT_DATA_SERP_ENDPOINT}?zone={zone}",
+            _BRIGHT_DATA_SERP_ENDPOINT,
             data=json.dumps(
-                {"country": "us", "multi": [{"query": {"q": query, "num": 10}}]}
+                {
+                    "zone": zone,
+                    "url": google_search_url,
+                    "format": "json",
+                    "data_format": "parsed_light",
+                }
             ).encode("utf-8"),
             headers={
                 "Authorization": f"Bearer {api_key}",
@@ -284,7 +290,13 @@ class BrightDataSerpClient:
                 return [item for item in value if isinstance(item, Mapping)]
         for key in ("body", "response", "data", "multi"):
             if key in payload:
-                found = BrightDataSerpClient._find_result_items(payload[key])
+                nested_payload = payload[key]
+                if key == "body" and isinstance(nested_payload, str):
+                    try:
+                        nested_payload = json.loads(nested_payload)
+                    except json.JSONDecodeError:
+                        return None
+                found = BrightDataSerpClient._find_result_items(nested_payload)
                 if found is not None:
                     return found
         return None

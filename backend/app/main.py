@@ -118,3 +118,6 @@ async def paid_api() -> dict[str, str]:
         "service": "SpendPilot",
         "result": "Paid API access granted",
     }
+
+from app.agent_governance_routes import router as agent_governance_router
+app.include_router(agent_governance_router)

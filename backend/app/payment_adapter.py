@@ -5,16 +5,13 @@ from decimal import Decimal
 
 import httpx
 from eth_account import Account
-
-from app.x402_policy import create_x402_policy
-
 from x402 import x402Client
 from x402.http.clients import x402HttpxClient
 from x402.mechanisms.evm import EthAccountSigner
 from x402.mechanisms.evm.exact import ExactEvmScheme
 
 from app.payment_validator import validate_payment_challenge
-
+from app.x402_policy import create_x402_policy
 
 NETWORK = "eip155:84532"
 

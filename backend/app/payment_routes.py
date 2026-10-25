@@ -1,4 +1,3 @@
-
 """SpendPilot payment API routes.
 
 Legacy payment history is preserved.
@@ -23,7 +22,6 @@ from app.shared_payment_service import (
     PaymentPreparationError,
     prepare_shared_payment,
 )
-
 
 router = APIRouter(prefix="/api", tags=["SpendPilot"])
 

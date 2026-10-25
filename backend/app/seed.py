@@ -21,6 +21,20 @@ def seed() -> None:
             )
             db.add(user)
             db.flush()
+        existing_budget = (
+            db.query(Budget)
+            .filter_by(owner_id=user.id, name="Demo operations budget")
+            .one_or_none()
+        )
+        if existing_budget is None:
+            db.add(
+                Budget(
+                    owner_id=user.id,
+                    name="Demo operations budget",
+                    currency="USD",
+                    total=Decimal("500.00"),
+                )
+            )
 
         # Create a separate demo reviewer account
         reviewer = db.query(User).filter_by(
@@ -33,20 +47,6 @@ def seed() -> None:
                 display_name="SpendPilot Demo Reviewer",
             )
             db.add(reviewer)
-
-        # Create the demo user's $500 operations budget
-        if not db.query(Budget).filter_by(
-            owner_id=user.id,
-            name="Demo operations budget"
-        ).one_or_none():
-            db.add(
-                Budget(
-                    owner_id=user.id,
-                    name="Demo operations budget",
-                    currency="USD",
-                    total=Decimal("500.00"),
-                )
-            )
 
 
 if __name__ == "__main__":

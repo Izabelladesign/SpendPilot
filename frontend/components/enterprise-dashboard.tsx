@@ -22,12 +22,6 @@ import {
   type Task,
 } from "@/lib/spendpilot-api";
 
-const money = new Intl.NumberFormat("en-US", {
-  style: "currency",
-  currency: "USD",
-  maximumFractionDigits: 2,
-});
-
 function amount(value: string | number): number {
   const parsed = Number(value);
   return Number.isFinite(parsed) ? parsed : 0;
@@ -98,6 +92,8 @@ export function EnterpriseDashboard() {
   }
 
   useEffect(() => {
+    // Refresh synchronizes this client component with the external API.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     void refresh();
     // The selected task is intentionally included so its timeline refreshes when changed.
     // eslint-disable-next-line react-hooks/exhaustive-deps

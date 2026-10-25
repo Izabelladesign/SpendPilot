@@ -1,20 +1,21 @@
 
+import os
 from dataclasses import dataclass
 from decimal import Decimal
 
+from dotenv import load_dotenv
+
+from app import payment_store
+from app import persistent_budget_service as budgets
+from app.onchain_verifier import verify_usdc_settlement
 from app.policy_engine import (
     Decision,
     PaymentRequest,
     SpendingPolicy,
     evaluate_payment,
 )
-from app import payment_store
-from app import persistent_budget_service as budgets
-import os
-from dotenv import load_dotenv
-
-from app.onchain_verifier import verify_usdc_settlement
 from app.vendor_verifier import TRUSTED_VENDORS
+
 
 @dataclass(frozen=True)
 class GovernedPaymentResult:

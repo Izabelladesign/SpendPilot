@@ -12,7 +12,6 @@ from sqlalchemy import update
 from sqlalchemy.orm import Session
 
 from app.database import get_db
-from app.reviewer_auth import require_reviewer
 from app.models import (
     AgentEvent,
     Approval,
@@ -22,6 +21,7 @@ from app.models import (
     TaskStatus,
     User,
 )
+from app.reviewer_auth import require_reviewer
 from app.schemas import (
     AgentEventResponse,
     ApprovalDecisionRequest,

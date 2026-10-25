@@ -286,7 +286,13 @@ def list_tasks(
     if task_status:
         query = query.filter(Task.status == task_status)
     tasks = query.limit(limit).all()
-    return TaskListResponse(items=[_task_response(task) for task in tasks])
+    return TaskListResponse(
+        items=[
+            _task_response(task)
+            for task in tasks
+            if task.budget is not None and task.budget.total > 0
+        ]
+    )
 
 
 @router.get("/tasks/{task_id}", response_model=TaskResponse)

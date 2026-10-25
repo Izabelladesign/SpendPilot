@@ -52,6 +52,7 @@ async def coinbase_mcp_read_only(
         "integration": "Coinbase MCP",
         "tool": tool_name,
         "invoked": True,
+        "tool_succeeded": not bool(result.isError),
         "tool_reported_error": bool(result.isError),
         "payment_executed": False,
         "result_redacted": True,

@@ -57,7 +57,10 @@ export const createJiraSpendRequest = async ({
     normalizedConstraints.length
       ? `Constraints: ${normalizedConstraints.join(', ')}`
       : 'Constraints: None specified',
+    'SpendPilot workflow: Intake -> Research -> Recommendation -> Human approval -> Payment -> Verification.',
     'SpendPilot status: Intake captured; approval and purchase are separate steps.',
+    'Decision packet: evidence, budget cap, selected provider, approval state, payment state, and verification state are tracked separately.',
+    'License health: after purchase, SpendPilot can flag unused or unactivated access for review before renewal.',
   ].join('\n');
 
   let response;
@@ -74,7 +77,7 @@ export const createJiraSpendRequest = async ({
           summary: normalizedSummary,
           description: paragraphDocument(issueDescription),
           issuetype: { name: 'Task' },
-          labels: ['spendpilot', 'spend-request'],
+          labels: ['spendpilot', 'spend-request', 'spend-passport'],
         },
       }),
     });

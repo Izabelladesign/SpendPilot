@@ -315,3 +315,60 @@ def test_local_demo_run_rejects_an_unmatched_scenario(client: TestClient) -> Non
 
     assert response.status_code == 409
     assert response.json()["error"]["code"] == "unsupported_demo_scenario"
+
+
+def test_local_demo_creates_reviewable_decision_packet_without_payment(
+    client: TestClient,
+) -> None:
+    payload = task_payload()
+    payload["objective"] = "Compare GitHub Copilot and Cursor for a 50-person engineering team"
+    created = client.post("/tasks", json=payload).json()
+
+    demo = client.post(f"/tasks/{created['id']}/demo-run")
+    assert demo.status_code == 200
+
+    response = client.post(f"/tasks/{created['id']}/demo-purchase-preview")
+
+    assert response.status_code == 200, response.text
+    body = response.json()
+    packet = body["output"]["decisionPacket"]
+    assert body["selectedProviderId"]
+    assert packet["approvalStatus"] == "PENDING"
+    assert packet["paymentStatus"] == "NOT_AUTHORIZED"
+    assert packet["fundsMoved"] is False
+
+    summary = client.get(f"/tasks/{created['id']}/execution").json()
+    assert summary["purchaseRequests"][0]["decision"] == "REVIEW_REQUIRED"
+    assert summary["approvals"][0]["status"] == "PENDING"
+    assert summary["payments"] == []
+    events = client.get(f"/tasks/{created['id']}/events").json()["items"]
+    assert events[-1]["type"] == "PURCHASE_REQUEST_CREATED"
+
+    duplicate = client.post(f"/tasks/{created['id']}/demo-purchase-preview")
+    assert duplicate.status_code == 200
+    assert len(client.get(f"/tasks/{created['id']}/events").json()["items"]) == 9
+
+
+def test_local_demo_can_show_approval_and_coinbase_payment_without_money(
+    client: TestClient,
+) -> None:
+    payload = task_payload()
+    payload["objective"] = "Compare GitHub Copilot and Cursor for a 50-person engineering team"
+    created = client.post("/tasks", json=payload).json()
+    client.post(f"/tasks/{created['id']}/demo-run")
+    client.post(f"/tasks/{created['id']}/demo-purchase-preview")
+
+    approved = client.post(f"/tasks/{created['id']}/demo-approve")
+    assert approved.status_code == 200
+    assert approved.json()["output"]["decisionPacket"]["approvalStatus"] == "APPROVED"
+
+    simulated = client.post(f"/tasks/{created['id']}/demo-payment")
+    assert simulated.status_code == 200
+    packet = simulated.json()["output"]["decisionPacket"]
+    assert packet["paymentStatus"] == "SIMULATED_NO_FUNDS"
+    assert packet["fundsMoved"] is False
+
+    summary = client.get(f"/tasks/{created['id']}/execution").json()
+    assert summary["approvals"][0]["status"] == "APPROVED"
+    assert summary["payments"][0]["status"] == "SIMULATED"
+    assert summary["payments"][0]["transactionReference"].startswith("demo-only:")

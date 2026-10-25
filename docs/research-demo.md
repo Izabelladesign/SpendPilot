@@ -43,11 +43,24 @@ scenario is already configured for:
 ```
 
 Click **Start agent run**, then **Run safe local agent simulation**. The
-frontend calls `POST /tasks/{taskId}/demo-run`. This single local run records
+frontend calls `POST /tasks/{taskId}/demo-run`, followed by the safe
+`POST /tasks/{taskId}/demo-purchase-preview` boundary. This local run records
 the researched candidates, explicitly recommends GitHub Copilot over Cursor,
-records the governance gate, creates a purchase preview, records sample
+creates a persisted purchase request and pending approval, records sample
 license-health findings, and verifies the result. It does not call a provider,
-access a vendor account, or move funds.
+access a vendor account, reserve real funds, or move money.
+
+The resulting decision packet is the demo's central artifact. It contains the
+selected product, alternative, evidence status, budget cap, purchase-request
+ID, approval ID, payment state, and verification state. The request remains
+`REVIEW_REQUIRED` and the approval remains `PENDING`; no payment record is
+created by this local path.
+
+For the presentation-only continuation, click **Approve for demo (no money)**
+and then **Simulate Coinbase/x402 payment (no money)**. These routes create an
+`APPROVED` approval and a `SIMULATED` payment record with a `demo-only:`
+reference. They do not sign a transaction, call Coinbase, contact a provider,
+reserve funds, or create an on-chain settlement.
 
 For lower-level verifier testing, submit a local service response to
 `POST /tasks/{taskId}/verify`:
@@ -111,7 +124,8 @@ This is preliminary governance only and does not authorize or execute payment.
   verified task-specific prices.
 - A real research-service adapter that returns the brief.
 - A real Base Sepolia x402 settlement and on-chain reconciliation.
-- Forge deployment and installation of the new Jira spend-request action.
+- Forge deployment and installation of the new Jira spend-request action and
+  project-page fallback.
 - Public deployment.
 
 The x402 implementation fails closed when credentials or settlement evidence

@@ -48,6 +48,7 @@ PENDING
 IN_PROGRESS
 PENDING_RECONCILIATION
 SETTLED
+SIMULATED
 FAILED
 UNCERTAIN
 ```
@@ -283,6 +284,24 @@ This route is idempotent after the first demo run and never calls a provider,
 accesses a vendor account, signs a wallet transaction, or moves money. It
 returns `409 unsupported_demo_scenario` when the task objective is not the
 locked Copilot-versus-Cursor scenario.
+
+### `POST /tasks/{taskId}/demo-purchase-preview`
+
+Creates the local demo's persisted decision packet: a `REVIEW_REQUIRED`
+purchase request and a `PENDING` approval. It is idempotent for the task and
+does not call a provider, reserve real funds, or create a payment.
+
+### `POST /tasks/{taskId}/demo-approve`
+
+Records an `APPROVED` decision for the local demo packet. This route exists only
+to make the human approval gate visible in the no-money demo; it does not
+authorize a live payment.
+
+### `POST /tasks/{taskId}/demo-payment`
+
+Records a `SIMULATED` payment with a `demo-only:` transaction reference after
+the local approval. It does not sign a transaction, call Coinbase/x402, contact
+a provider, reserve funds, or create an on-chain settlement.
 
 ### `GET /budgets/{budgetId}`
 

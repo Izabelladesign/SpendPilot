@@ -2,7 +2,14 @@
 
 import { FormEvent, useState } from "react";
 import { AlertCircle, CheckCircle2, Play, Send } from "lucide-react";
-import { createTask, runLocalDemo, type Task } from "@/lib/spendpilot-api";
+import {
+  approveLocalPurchase,
+  createLocalPurchasePreview,
+  createTask,
+  runLocalDemo,
+  simulateLocalPayment,
+  type Task,
+} from "@/lib/spendpilot-api";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
@@ -56,14 +63,67 @@ export function EnterpriseIntake({ onTaskUpdated }: EnterpriseIntakeProps) {
     setError(null);
     try {
       const completed = await runLocalDemo(task.id);
-      setTask(completed);
-      onTaskUpdated(completed);
+      const withDecisionPacket = await createLocalPurchasePreview(completed.id);
+      setTask(withDecisionPacket);
+      onTaskUpdated(withDecisionPacket);
     } catch (requestError) {
       setError(requestError instanceof Error ? requestError.message : "Unable to verify the local demo result.");
     } finally {
       setBusy(false);
     }
   }
+
+  async function createApprovalPacket() {
+    if (!task) return;
+    setBusy(true);
+    setError(null);
+    try {
+      const withDecisionPacket = await createLocalPurchasePreview(task.id);
+      setTask(withDecisionPacket);
+      onTaskUpdated(withDecisionPacket);
+    } catch (requestError) {
+      setError(requestError instanceof Error ? requestError.message : "Unable to create the approval packet.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function approveDemoRequest() {
+    if (!task) return;
+    setBusy(true);
+    setError(null);
+    try {
+      const approved = await approveLocalPurchase(task.id);
+      setTask(approved);
+      onTaskUpdated(approved);
+    } catch (requestError) {
+      setError(requestError instanceof Error ? requestError.message : "Unable to approve the demo request.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function simulatePayment() {
+    if (!task) return;
+    setBusy(true);
+    setError(null);
+    try {
+      const paid = await simulateLocalPayment(task.id);
+      setTask(paid);
+      onTaskUpdated(paid);
+    } catch (requestError) {
+      setError(requestError instanceof Error ? requestError.message : "Unable to simulate the payment stage.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  const decisionPacket = task?.output?.decisionPacket as {
+    purchaseRequestId?: string;
+    approvalId?: string;
+    approvalStatus?: string;
+    paymentStatus?: string;
+  } | undefined;
 
   return (
     <Card>
@@ -116,12 +176,43 @@ export function EnterpriseIntake({ onTaskUpdated }: EnterpriseIntakeProps) {
                 {task.status.replaceAll("_", " ")}
               </Badge>
             </div>
-            <Button type="button" variant="outline" onClick={() => void runLocalDemoResult()} disabled={busy || task.status === "COMPLETED"} className="w-fit">
-              <Play />
-              Run safe local agent simulation
-            </Button>
+            {decisionPacket ? (
+              <div className="flex flex-col gap-3 rounded-lg border border-primary/30 bg-primary/5 p-3 text-sm">
+                <div>
+                  <p className="font-medium">Decision packet: {decisionPacket.paymentStatus === "SIMULATED_NO_FUNDS" ? "demo complete" : "routed for human review"}</p>
+                  <p className="text-xs text-muted-foreground">
+                    Purchase request {decisionPacket.purchaseRequestId} · approval {decisionPacket.approvalId} · {decisionPacket.approvalStatus}
+                  </p>
+                </div>
+                {decisionPacket.approvalStatus === "PENDING" ? (
+                  <Button type="button" variant="outline" onClick={() => void approveDemoRequest()} disabled={busy} className="w-fit">
+                    <CheckCircle2 />
+                    Approve for demo (no money)
+                  </Button>
+                ) : null}
+                {decisionPacket.approvalStatus === "APPROVED" && decisionPacket.paymentStatus === "NOT_AUTHORIZED" ? (
+                  <Button type="button" variant="outline" onClick={() => void simulatePayment()} disabled={busy} className="w-fit">
+                    <Play />
+                    Simulate Coinbase/x402 payment (no money)
+                  </Button>
+                ) : null}
+                {decisionPacket.paymentStatus === "SIMULATED_NO_FUNDS" ? (
+                  <p className="text-xs text-muted-foreground">Payment stage shown for the demo only. No wallet, chain transaction, provider, or funds were touched.</p>
+                ) : null}
+              </div>
+            ) : task.output?.demoRun ? (
+              <Button type="button" variant="outline" onClick={() => void createApprovalPacket()} disabled={busy} className="w-fit">
+                <Play />
+                Create approval packet
+              </Button>
+            ) : (
+              <Button type="button" variant="outline" onClick={() => void runLocalDemoResult()} disabled={busy || task.status === "COMPLETED"} className="w-fit">
+                <Play />
+                Run safe local agent simulation
+              </Button>
+            )}
             <p className="text-xs text-muted-foreground">
-              This demo compares GitHub Copilot and Cursor, chooses Copilot explicitly, and stops before any purchase. It does not call a provider or execute payment.
+              This demo compares GitHub Copilot and Cursor, chooses Copilot explicitly, creates a reviewable decision packet, and stops before any purchase. It does not call a provider or execute payment.
             </p>
           </div>
         ) : null}

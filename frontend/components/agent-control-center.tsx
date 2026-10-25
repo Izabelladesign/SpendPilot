@@ -74,6 +74,13 @@ export function AgentControlCenter({
   const [reviewedLicenses, setReviewedLicenses] = useState<string[]>([]);
   const [purchasePreviewed, setPurchasePreviewed] = useState(false);
   const demoRun = task?.output?.demoRun as LocalDemoRun | undefined;
+  const decisionPacket = task?.output?.decisionPacket as {
+    purchaseRequestId?: string;
+    approvalId?: string;
+    approvalStatus?: string;
+    paymentStatus?: string;
+    fundsMoved?: boolean;
+  } | undefined;
   const demoScenario = Boolean(demoRun);
   const selectedProduct = demoRun?.recommendation.selectedProduct ?? "NOT READY";
   const alternativeProduct = demoRun?.recommendation.alternativeProduct ?? "—";
@@ -83,6 +90,8 @@ export function AgentControlCenter({
   const researchStarted = Boolean(task);
   const purchaseState = purchasePreviewed
     ? "SIMULATED — NO CHARGE"
+    : decisionPacket?.paymentStatus === "SIMULATED_NO_FUNDS"
+      ? "SIMULATED — NO CHARGE"
     : payments.length > 0
       ? payments.at(-1)?.status ?? "RECORDED"
       : "NOT EXECUTED";
@@ -91,7 +100,8 @@ export function AgentControlCenter({
   function stageState(index: number): "complete" | "active" | "pending" {
     if (failed) return index === 0 ? "complete" : index === 1 ? "active" : "pending";
     if (!researchStarted) return "pending";
-    if (completed) return "complete";
+    if (completed && decisionPacket?.paymentStatus === "SIMULATED_NO_FUNDS") return "complete";
+    if (completed) return index < 4 ? "complete" : "active";
     return index === 0 ? "complete" : index === 1 ? "active" : "pending";
   }
 
@@ -238,9 +248,17 @@ export function AgentControlCenter({
             </div>
             <div className="flex items-center justify-between gap-3">
               <span className="text-sm text-muted-foreground">Payment</span>
-              <Badge variant="secondary">{purchaseState}</Badge>
+              <Badge variant="secondary">{decisionPacket?.paymentStatus ?? purchaseState}</Badge>
             </div>
-            {demoScenario && completed && !purchasePreviewed ? (
+            {decisionPacket ? (
+              <div className="rounded-lg border bg-background p-3 text-xs text-muted-foreground">
+                <p className="font-medium text-foreground">Decision packet</p>
+                <p className="mt-1">Purchase request: {decisionPacket.purchaseRequestId}</p>
+                <p>Approval: {decisionPacket.approvalId} ({decisionPacket.approvalStatus})</p>
+                <p className="mt-1">Funds moved: {decisionPacket.fundsMoved ? "Yes" : "No — local simulation"}</p>
+              </div>
+            ) : null}
+            {demoScenario && completed && !purchasePreviewed && !decisionPacket ? (
               <Button type="button" variant="outline" onClick={() => setPurchasePreviewed(true)}>
                 <ShoppingCart />
                 Preview governed purchase
@@ -248,7 +266,7 @@ export function AgentControlCenter({
             ) : null}
             {purchasePreviewed ? (
               <div className="rounded-lg border border-primary/30 bg-primary/5 p-3 text-xs text-muted-foreground">
-                Purchase preview passed the demo guardrails. No card, wallet, provider, or funds were touched.
+              Purchase preview passed the demo guardrails. No card, wallet, provider, or funds were touched.
               </div>
             ) : null}
             <div className="rounded-lg bg-muted/40 p-3 text-xs text-muted-foreground">

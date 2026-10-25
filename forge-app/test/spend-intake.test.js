@@ -69,7 +69,7 @@ test('Jira action creates a review issue without payment fields', async () => {
   const body = JSON.parse(request.options.body);
   assert.equal(body.fields.project.key, 'SP');
   assert.equal(body.fields.issuetype.name, 'Task');
-  assert.deepEqual(body.fields.labels, ['spendpilot', 'spend-request']);
+  assert.deepEqual(body.fields.labels, ['spendpilot', 'spend-request', 'spend-passport']);
   assert.match(body.fields.description.content[0].content[0].text, /Compare options/);
 });
 

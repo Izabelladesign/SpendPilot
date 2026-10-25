@@ -211,6 +211,24 @@ export function runLocalDemo(taskId: string): Promise<Task> {
   });
 }
 
+export function createLocalPurchasePreview(taskId: string): Promise<Task> {
+  return request<Task>(`/tasks/${taskId}/demo-purchase-preview`, {
+    method: "POST",
+  });
+}
+
+export function approveLocalPurchase(taskId: string): Promise<Task> {
+  return request<Task>(`/tasks/${taskId}/demo-approve`, {
+    method: "POST",
+  });
+}
+
+export function simulateLocalPayment(taskId: string): Promise<Task> {
+  return request<Task>(`/tasks/${taskId}/demo-payment`, {
+    method: "POST",
+  });
+}
+
 export function listTasks(): Promise<ListResponse<Task>> {
   return request<ListResponse<Task>>("/tasks?limit=100");
 }

@@ -59,7 +59,7 @@ function statusLabel(status: string): string {
 }
 
 function executionStatusVariant(status: string): "default" | "secondary" | "outline" | "destructive" {
-  if (["SETTLED", "APPROVED", "VERIFIED", "COMPLETED"].includes(status)) return "default";
+  if (["SETTLED", "SIMULATED", "APPROVED", "VERIFIED", "COMPLETED"].includes(status)) return "default";
   if (["FAILED", "BLOCK", "REJECTED", "FAILED_VERIFICATION"].includes(status)) return "destructive";
   if (["REVIEW_REQUIRED", "PENDING", "VERIFYING"].includes(status)) return "outline";
   return "secondary";

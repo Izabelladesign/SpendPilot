@@ -3,9 +3,12 @@ import os
 
 from dotenv import load_dotenv
 from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
 from app.payment_routes import router as payment_router
+from app.task_routes import router as task_router
 from app.payment_store import initialize_database
 from app.persistent_budget_service import initialize_budget_database
+from app.governance_routes import router as governance_router
 
 from x402.http import (
     HTTPFacilitatorClient,
@@ -20,11 +23,23 @@ from x402.server import x402ResourceServer
 load_dotenv()
 
 app = FastAPI(title="SpendPilot x402 API")
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["http://localhost:3000", "http://127.0.0.1:3000"],
+    allow_credentials=False,
+    allow_methods=["GET", "POST", "OPTIONS"],
+    allow_headers=["Content-Type"],
+)
 
 initialize_database()
 initialize_budget_database()
+for route in governance_router.routes:
+    app.router.routes.append(route)
 
 for route in payment_router.routes:
+    app.router.routes.append(route)
+
+for route in task_router.routes:
     app.router.routes.append(route)
 
 NETWORK = "eip155:84532"

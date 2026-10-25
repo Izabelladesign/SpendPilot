@@ -53,3 +53,19 @@ forge install --upgrade --site https://spendpilot.atlassian.net --product jira
 The Jira action is intentionally limited to creating a review issue. Approval,
 provider selection, purchase execution, and license management still belong to
 the shared backend and must remain separate authorization steps.
+
+### Test Jira without an OpenAI key
+
+You can verify the Jira connection before configuring OpenAI by asking Rovo for
+a direct structured issue:
+
+```text
+Create a Jira spend request in project SP.
+Summary: Compare GitHub Copilot and Cursor.
+Description: Research both products for a 50-person engineering team and return pricing, security, sources, and unknowns.
+Budget: 1.00 USD.
+Constraints: Research only, human approval required.
+```
+
+This invokes only the Jira action. It creates a review issue and does not call
+OpenAI, approve spending, or make a purchase.

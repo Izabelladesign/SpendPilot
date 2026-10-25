@@ -28,6 +28,7 @@ class WorkflowStatus(StrEnum):
     RESEARCH_UNAVAILABLE = "research_unavailable"
     NO_RECOMMENDATION = "no_recommendation"
     AWAITING_GOVERNANCE_APPROVAL = "awaiting_governance_approval"
+    AWAITING_VERIFICATION = "awaiting_verification"
     REJECTED = "rejected"
     FAILED = "failed"
     COMPLETE = "complete"
@@ -490,4 +491,13 @@ class SpendPilotWorkflow:
             warnings = warnings + [execution.message]
         if verification and verification.status is VerificationStatus.STUBBED:
             warnings = warnings + [verification.message]
+        if verification and verification.status is VerificationStatus.FAILED:
+            return {"terminal_status": WorkflowStatus.FAILED, "warnings": warnings}
+        if (
+            execution is None
+            or execution.status is not ExecutionStatus.SUCCEEDED
+            or verification is None
+            or verification.status is not VerificationStatus.VERIFIED
+        ):
+            return {"terminal_status": WorkflowStatus.AWAITING_VERIFICATION, "warnings": warnings}
         return {"terminal_status": WorkflowStatus.COMPLETE, "warnings": warnings}

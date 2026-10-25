@@ -252,19 +252,32 @@ export function ShoppingRequest() {
       }
 
       const rawReview = (await governanceResponse.json()) as {
-        status: GovernanceStatus | "REVIEW_REQUIRED";
+        status:
+          | GovernanceStatus
+          | "APPROVED"
+          | "DENIED"
+          | "REVIEW_REQUIRED";
         reason: string;
         proposed_budget_usd: string;
         requires_human_approval: boolean;
         payment_authorized: boolean;
       };
 
+      let normalizedStatus: GovernanceStatus;
+
+      if (rawReview.status === "APPROVED") {
+        normalizedStatus = "ALLOW";
+      } else if (rawReview.status === "DENIED") {
+        normalizedStatus = "BLOCK";
+      } else if (rawReview.status === "REVIEW_REQUIRED") {
+        normalizedStatus = "REVIEW";
+      } else {
+        normalizedStatus = rawReview.status;
+      }
+      
       const review: GovernanceReview = {
         ...rawReview,
-        status:
-          rawReview.status === "REVIEW_REQUIRED"
-            ? "REVIEW"
-            : rawReview.status,
+        status: normalizedStatus,
       };
 
       if (requestVersion.current !== version) return;

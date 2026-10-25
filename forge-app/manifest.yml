@@ -83,6 +83,13 @@ modules:
           type: string
           required: false
           description: Comma-separated purchasing constraints.
+  jira:projectPage:
+    - key: spendpilot-project-page
+      resource: spendpilot-project-page
+      resolver:
+        function: projectPageResolver
+      render: native
+      title: SpendPilot
   function:
     # Forge requires at least one function definition on every app.
     - key: placeholder
@@ -91,6 +98,11 @@ modules:
       handler: index.parseSpendRequest
     - key: createJiraSpendRequest
       handler: index.createJiraSpendRequest
+    - key: projectPageResolver
+      handler: index.resolver
+resources:
+  - key: spendpilot-project-page
+    path: src/frontend/project-page.jsx
 permissions:
   scopes:
     - write:jira-work

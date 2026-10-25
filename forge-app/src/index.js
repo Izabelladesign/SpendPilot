@@ -6,6 +6,10 @@
 
 import { parseSpendRequest as parseRequest } from './spend-intake.js';
 import { createJiraSpendRequest as createJiraIssue } from './jira-spend-request.js';
+import Resolver from '@forge/resolver';
+
+const projectPageResolver = new Resolver();
+projectPageResolver.define('createJiraSpendRequest', async ({ payload }) => createJiraIssue(payload));
 
 export const placeholder = async (payload, context) => {
   // Intentionally unused. See the note above.
@@ -23,3 +27,5 @@ export const placeholder = async (payload, context) => {
 export const parseSpendRequest = async (payload) => parseRequest(payload);
 
 export const createJiraSpendRequest = async (payload) => createJiraIssue(payload);
+
+export const resolver = projectPageResolver.getDefinitions();

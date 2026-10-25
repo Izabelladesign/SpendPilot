@@ -69,3 +69,9 @@ Constraints: Research only, human approval required.
 
 This invokes only the Jira action. It creates a review issue and does not call
 OpenAI, approve spending, or make a purchase.
+
+### Jira project page fallback
+
+If Rovo is not available on the site, open the Jira project and select the
+**SpendPilot** tab in the project navigation. The page provides the same Jira
+review-issue action without requiring Rovo or an OpenAI key.

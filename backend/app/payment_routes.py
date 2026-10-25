@@ -346,6 +346,12 @@ async def execute_approved_purchase_x402(
         )
 
     amount = Decimal(purchase.amount)
+
+    # Copilot-vs-Cursor research demo: maximum $1 per purchase.
+    # This is an additional limit, not a replacement for budget policy.
+    if amount > Decimal("1.00"):
+        raise HTTPException(409, "Research demo spending cap exceeded")
+
     if (
         purchase.currency != "USD"
         or amount <= 0
@@ -409,23 +415,25 @@ async def execute_approved_purchase_x402(
             "purchase_request_id": purchase.id,
         }
 
-    # Use the exact resource path allowed by the governed service.
-    try:
-        result = await execute_governed_x402(
-            idempotency_key=key,
-            resource_url="http://127.0.0.1:8001/paid-resource",
-        )
-    except ValueError as exc:
-        raise HTTPException(409, str(exc)) from exc
+    # Never re-execute a payment that is already verified as PAID.
+    # A retry may only reconcile shared accounting.
+    if governed.status != "PAID":
+        try:
+            result = await execute_governed_x402(
+                idempotency_key=key,
+                resource_url="http://127.0.0.1:8001/paid-resource",
+            )
+        except ValueError as exc:
+            raise HTTPException(409, str(exc)) from exc
 
-    # Never mark the shared payment paid from an HTTP success alone.
-    if result.status != "PAID":
-        return {
-            "status": result.status,
-            "message": result.message,
-            "idempotency_key": key,
-            "purchase_request_id": purchase.id,
-        }
+        if result.status != "PAID":
+            return {
+                "status": result.status,
+                "message": result.message,
+                "idempotency_key": key,
+                "purchase_request_id": purchase.id,
+                "payment_id": shared_payment.id,
+            }
 
     # Get the transaction hash that the governed verifier recorded.
     with connect() as conn:
@@ -435,7 +443,7 @@ async def execute_approved_purchase_x402(
             (key,),
         ).fetchone()
 
-    if row is None:
+    if row is None or not row[0]:
         raise HTTPException(
             409,
             "Settlement needs reconciliation; no verified hash recorded",

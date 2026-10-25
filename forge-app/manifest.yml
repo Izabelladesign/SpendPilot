@@ -46,7 +46,7 @@ modules:
     - key: create-jira-spend-request
       name: Create a Jira spend request
       function: createJiraSpendRequest
-      actionVerb: POST
+      actionVerb: CREATE
       description: >-
         Create a Jira Task issue containing a structured spend request for
         review. This does not approve, purchase, reserve funds, or charge money.

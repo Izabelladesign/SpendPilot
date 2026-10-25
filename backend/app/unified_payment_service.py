@@ -132,6 +132,12 @@ def prepare_governed_payment(
             idempotency_key,
         )
 
+    payment_store.update_payment(
+        idempotency_key,
+        "READY",
+        "Policy approved and funds reserved",
+    )
+
     return GovernedPaymentResult(
         "READY",
         "Policy approved and funds reserved",

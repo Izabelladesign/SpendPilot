@@ -22,6 +22,8 @@ from app.services.workflow import OptimizerRecommendation
 
 class AgentStatus(StrEnum):
     INVALID_REQUEST = "invalid_request"
+    HANDOFF_UNAVAILABLE = "handoff_unavailable"
+    DUPLICATE_REQUEST = "duplicate_request"
     AWAITING_APPROVAL = "awaiting_approval"
     REJECTED = "rejected"
     EXECUTION_NOT_CONFIGURED = "execution_not_configured"
@@ -36,21 +38,54 @@ class ExecutionPlan(BaseModel):
     steps: tuple[str, ...]
 
 
-class PurchaseRequest(BaseModel):
-    """A proposal for a specific task and quote, not authorization to spend."""
+class PurchaseProposal(BaseModel):
+    """Details submitted to the shared backend; never an authorization."""
 
     model_config = ConfigDict(extra="forbid", frozen=True)
 
     task_id: str = Field(min_length=1)
+    provider_id: str = Field(min_length=1)
     idempotency_key: str = Field(min_length=1)
-    vendor: str = Field(min_length=1)
-    source_url: str = Field(min_length=1)
-    amount_usd: Decimal = Field(gt=0, allow_inf_nan=False)
+    amount: Decimal = Field(gt=0, allow_inf_nan=False)
+    currency: str = Field(pattern=r"^[A-Z]{3}$")
 
-    def as_policy_request(self) -> PaymentRequest:
+
+class PurchaseRequest(PurchaseProposal):
+    """Canonical backend response bound to the exact proposed purchase."""
+
+    id: str = Field(min_length=1)
+    decision: str = Field(min_length=1)
+    decision_reason: str
+
+    def as_policy_request(self, vendor: str) -> PaymentRequest:
         """Map to Developer 2's existing USD-only governance input."""
 
-        return PaymentRequest(task_id=self.task_id, vendor=self.vendor, amount_usd=self.amount_usd)
+        return PaymentRequest(task_id=self.task_id, vendor=vendor, amount_usd=self.amount)
+
+
+class ResolvedProvider(BaseModel):
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    provider_id: str = Field(min_length=1)
+    vendor: str = Field(min_length=1)
+    source_url: str = Field(min_length=1)
+
+
+class ProviderResolverPort(Protocol):
+    async def resolve(self, *, vendor: str, source_url: str) -> ResolvedProvider | None: ...
+
+
+class PersistenceResult(BaseModel):
+    """The backend must atomically indicate whether this key was newly created."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    request: PurchaseRequest
+    created: bool = Field(strict=True)
+
+
+class PurchasePersistencePort(Protocol):
+    async def create(self, proposal: PurchaseProposal) -> PersistenceResult | None: ...
 
 
 @dataclass(frozen=True)
@@ -124,9 +159,13 @@ class ExecutionAgent:
         *,
         governance: GovernanceReviewPort | None = None,
         service: ApprovedServicePort | None = None,
+        provider_resolver: ProviderResolverPort | None = None,
+        persistence: PurchasePersistencePort | None = None,
     ) -> None:
         self._governance = governance
         self._service = service if service is not None else SafeServiceStub()
+        self._provider_resolver = provider_resolver
+        self._persistence = persistence
 
     async def execute(
         self,
@@ -156,13 +195,33 @@ class ExecutionAgent:
                 "A supported task, USD recommendation, task ID, and idempotency key are required.",
             )
 
+        if self._provider_resolver is None or self._persistence is None:
+            return self._result(
+                AgentStatus.HANDOFF_UNAVAILABLE,
+                "Provider resolution and purchase persistence are not configured.",
+            )
         try:
-            purchase = PurchaseRequest(
+            resolved = await self._provider_resolver.resolve(
+                vendor=provider.provider_name, source_url=provider.source_url
+            )
+        except Exception:
+            return self._result(AgentStatus.HANDOFF_UNAVAILABLE, "Provider resolution unavailable.")
+        if (
+            not isinstance(resolved, ResolvedProvider)
+            or not isinstance(resolved.provider_id, str)
+            or not resolved.provider_id.strip()
+            or resolved.vendor != provider.provider_name
+            or resolved.source_url != provider.source_url
+        ):
+            return self._result(AgentStatus.INVALID_REQUEST, "Provider resolution did not match.")
+
+        try:
+            proposal = PurchaseProposal(
                 task_id=task_id.strip(),
+                provider_id=resolved.provider_id,
                 idempotency_key=idempotency_key.strip(),
-                vendor=provider.provider_name,
-                source_url=provider.source_url,
-                amount_usd=Decimal(str(recommendation.estimated_cost)),
+                amount=Decimal(str(recommendation.estimated_cost)),
+                currency=recommendation.currency,
             )
         except (ValidationError, ValueError):
             return self._result(AgentStatus.INVALID_REQUEST, "The proposed purchase is invalid.")
@@ -177,6 +236,36 @@ class ExecutionAgent:
         )
         events = [AgentEvent(type="EXECUTION_PLANNED", message="Execution plan prepared.")]
 
+        try:
+            persisted = await self._persistence.create(proposal)
+        except Exception:
+            return self._result(
+                AgentStatus.HANDOFF_UNAVAILABLE, "Purchase persistence unavailable.", plan
+            )
+        if not isinstance(persisted, PersistenceResult):
+            return self._result(
+                AgentStatus.HANDOFF_UNAVAILABLE, "No canonical purchase request returned.", plan
+            )
+        purchase = persisted.request
+        if (
+            not isinstance(purchase, PurchaseRequest)
+            or not isinstance(purchase.id, str)
+            or not purchase.id.strip()
+            or any(
+                getattr(purchase, field) != getattr(proposal, field)
+                for field in type(proposal).model_fields
+            )
+        ):
+            return self._result(
+                AgentStatus.INVALID_REQUEST, "Canonical purchase details do not match.", plan
+            )
+        if persisted.created is not True:
+            return self._result(
+                AgentStatus.DUPLICATE_REQUEST,
+                "Existing idempotency key requires backend reconciliation before execution.",
+                plan, purchase, events,
+            )
+
         if self._governance is None:
             return self._result(
                 AgentStatus.AWAITING_APPROVAL,
@@ -187,7 +276,7 @@ class ExecutionAgent:
             )
         try:
             decision = await self._governance.review(
-                purchase.as_policy_request(), purchase=purchase
+                purchase.as_policy_request(provider.provider_name), purchase=purchase
             )
         except Exception:
             return self._result(

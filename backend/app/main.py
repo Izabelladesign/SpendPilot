@@ -1,9 +1,10 @@
-from app.coinbase_mcp import router as coinbase_mcp_router
 """SpendPilot FastAPI application entry point.
 
 The shared task API and the Coinbase/x402 payment API are mounted together,
 but payment execution remains owned by the payment services.
 """
+
+from app.coinbase_mcp import router as coinbase_mcp_router
 
 import os
 

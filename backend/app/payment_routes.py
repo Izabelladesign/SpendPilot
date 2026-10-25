@@ -27,6 +27,17 @@ from app.shared_payment_service import (
 router = APIRouter(prefix="/api", tags=["SpendPilot"])
 
 
+def require_explicit_testnet_execution():
+    """Separate opt-in for live Base Sepolia testnet transfers."""
+    import os
+    if os.getenv("SPENDPILOT_ENABLE_TESTNET_X402") != "true":
+        raise HTTPException(
+            status_code=403,
+            detail="Real testnet x402 execution is disabled by default",
+        )
+
+
+
 # Legacy demo policy, retained for reference.
 DEMO_POLICIES = {
     "TASK-001": SpendingPolicy(
@@ -259,6 +270,7 @@ class GovernedX402ExecutionRequest(BaseModel):
 async def execute_x402_payment_route(
     payload: GovernedX402ExecutionRequest,
     operator: str = Depends(require_payment_operator),
+    testnet_enabled: None = Depends(require_explicit_testnet_execution),
 ):
     """Execute an already-READY governed-ledger payment once."""
     try:
@@ -287,6 +299,7 @@ async def execute_x402_payment_route(
 async def execute_approved_purchase_x402(
     purchase_request_id: str,
     operator: str = Depends(require_payment_operator),
+    testnet_enabled: None = Depends(require_explicit_testnet_execution),
     db: Session = Depends(get_db),
 ):
     """Execute an approved shared purchase through governed x402."""
@@ -338,7 +351,7 @@ async def execute_approved_purchase_x402(
 
     # Fail closed: only a vendor explicitly present in the trusted
     # registry may be charged. Do not infer trust from a display name.
-    vendor_name = provider.metadata_json.get("x402_vendor_name", "")
+    vendor_name = (provider.metadata_json or {}).get("x402_vendor_name", "")
     if vendor_name not in TRUSTED_VENDORS:
         raise HTTPException(
             409,

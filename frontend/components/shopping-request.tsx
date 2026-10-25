@@ -69,7 +69,7 @@ export function ShoppingRequest() {
     );
   }
 
-  function onSubmit(event: FormEvent<HTMLFormElement>) {
+  async function onSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     clearTimers();
 
@@ -102,13 +102,60 @@ export function ShoppingRequest() {
     setStage(0);
 
     timers.current.push(window.setTimeout(() => setStage(1), 500));
-    timers.current.push(window.setTimeout(() => setStage(2), 1000));
-    timers.current.push(
-      window.setTimeout(() => {
-        setProducts(mockProducts(text, amount, quality));
-        setPhase("results");
-      }, 1600),
+timers.current.push(window.setTimeout(() => setStage(2), 1000));
+
+try {
+  const selectedRules = TRAITS
+    .filter((trait) => traits.includes(trait.id))
+    .map((trait) => trait.label);
+
+  const rawTask = [
+    text,
+    `Total budget: ${amount} USD.`,
+    `Quality preference: ${preferenceLabel(quality)}.`,
+    selectedRules.length
+      ? `Buying constraints: ${selectedRules.join(", ")}.`
+      : "Buying constraints: No additional buying rules specified.",
+  ].join("\n");
+
+  const response = await fetch(
+    `${process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8001"}/api/tasks/parse`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ raw_task: rawTask }),
+    },
+  );
+
+  if (!response.ok) {
+    throw new Error(`Parser request failed (${response.status})`);
+  }
+
+  const result = await response.json();
+
+  if (!result.is_ready_for_next_step) {
+    clearTimers();
+    setStage(-1);
+    setPhase("error");
+    setError(
+      result.clarification_questions?.join(" ") ||
+        "The AI needs more information before continuing.",
     );
+    return;
+  }
+
+  clearTimers();
+  setStage(2);
+  setProducts(mockProducts(text, amount, quality));
+  setPhase("results");
+} catch (err) {
+  clearTimers();
+  setStage(-1);
+  setPhase("error");
+  setError(
+    err instanceof Error ? err.message : "Could not contact the AI parser.",
+  );
+}   
   }
 
   const requestInvalid = phase === "error" && request.trim().length === 0;

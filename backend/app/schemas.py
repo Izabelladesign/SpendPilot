@@ -66,6 +66,11 @@ class TaskResponse(APIModel):
     updated_at: datetime = Field(alias="updatedAt")
 
 
+class TaskListResponse(APIModel):
+    items: list[TaskResponse]
+    next_cursor: str | None = Field(default=None, alias="nextCursor")
+
+
 class AgentEventResponse(APIModel):
     id: str
     task_id: str = Field(alias="taskId")

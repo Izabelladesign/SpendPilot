@@ -23,6 +23,7 @@ from app.schemas import (
     ExecuteTaskRequest,
     PaymentListResponse,
     PaymentResponse,
+    TaskListResponse,
     TaskResponse,
 )
 
@@ -193,6 +194,20 @@ def create_task(
     db.commit()
     db.refresh(task)
     return _task_response(task)
+
+
+@router.get("/tasks", response_model=TaskListResponse)
+def list_tasks(
+    request: Request,
+    task_status: str | None = Query(default=None, alias="status"),
+    limit: int = Query(default=50, ge=1, le=100),
+    db: Session = Depends(get_db),
+) -> TaskListResponse:
+    query = db.query(Task).order_by(Task.updated_at.desc())
+    if task_status:
+        query = query.filter(Task.status == task_status)
+    tasks = query.limit(limit).all()
+    return TaskListResponse(items=[_task_response(task) for task in tasks])
 
 
 @router.get("/tasks/{task_id}", response_model=TaskResponse)

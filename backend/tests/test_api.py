@@ -70,6 +70,15 @@ def test_create_and_get_task(client: TestClient) -> None:
     assert response.json()["id"] == created["id"]
 
 
+def test_list_tasks_supports_status_filter(client: TestClient) -> None:
+    created = create_task(client)
+
+    response = client.get("/tasks?status=REQUESTED&limit=10")
+
+    assert response.status_code == 200
+    assert [task["id"] for task in response.json()["items"]] == [created["id"]]
+
+
 def test_task_events_are_created_and_execution_is_idempotent(client: TestClient) -> None:
     created = create_task(client)
     task_id = created["id"]

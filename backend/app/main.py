@@ -8,6 +8,7 @@ import os
 
 from dotenv import load_dotenv
 from fastapi import FastAPI, HTTPException, Request
+from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
 from app.api import router
@@ -18,6 +19,19 @@ from app.persistent_budget_service import initialize_budget_database
 load_dotenv()
 
 app = FastAPI(title="SpendPilot API", version="0.1.0")
+
+allowed_origins = [
+    origin.strip()
+    for origin in os.getenv("CORS_ORIGINS", "http://localhost:3000").split(",")
+    if origin.strip()
+]
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=allowed_origins,
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 initialize_database()
 initialize_budget_database()

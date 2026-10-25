@@ -520,7 +520,14 @@ def read_purchase_settlement_evidence(
         raise HTTPException(404, "Purchase request not found")
     payment = db.query(Payment).filter_by(purchase_request_id=purchase.id).one_or_none()
     if payment is None:
-        raise HTTPException(404, "Shared payment not found")
+        return {
+            "purchase_request_id": str(purchase.id),
+            "status": "AWAITING_PAYMENT",
+            "settlement_verified": False,
+            "transaction_hash": None,
+            "payment_id": None,
+            "message": "Purchase request exists, but no payment has been recorded or verified.",
+        }
 
     key = f"shared-payment:{payment.id}"
     governed = payment_store.get_payment(key)

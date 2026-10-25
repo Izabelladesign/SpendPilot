@@ -21,7 +21,7 @@ import {
 import { cn } from "cn";
 
 const API_URL =
-  process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8001";
+  process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
 
 const TRAITS = [
   { id: "approved-vendors", label: "Approved vendors only" },

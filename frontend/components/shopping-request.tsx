@@ -1,4 +1,3 @@
-
 "use client";
 
 import { FormEvent, useEffect, useRef, useState } from "react";
@@ -21,14 +20,14 @@ import { cn } from "cn";
 const API_URL =
   process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8001";
 
-  const TRAITS = [
-    { id: "approved-vendors", label: "Approved vendors only" },
-    { id: "business-only", label: "Company purchases only" },
-    { id: "no-recurring", label: "No recurring subscriptions" },
-    { id: "verified-merchant", label: "Verified merchants only" },
-  ] as const;
+const TRAITS = [
+  { id: "approved-vendors", label: "Approved vendors only" },
+  { id: "business-only", label: "Company purchases only" },
+  { id: "no-recurring", label: "No recurring subscriptions" },
+  { id: "verified-merchant", label: "Verified merchants only" },
+] as const;
 
-  const STEPS = ["Parsing task", "Checking policy", "Authorizing"] as const;
+const STEPS = ["Parsing task", "Checking policy", "Authorizing"] as const;
 
 type Phase = "idle" | "loading" | "results" | "error";
 
@@ -83,7 +82,8 @@ export function ShoppingRequest() {
   const [submittedRequest, setSubmittedRequest] = useState("");
   const [submittedBudget, setSubmittedBudget] = useState<number | null>(null);
   const [submittedTraits, setSubmittedTraits] = useState<string[]>([]);
-  const [governance, setGovernance] = useState<GovernanceReview | null>(null);
+  const [governance, setGovernance] =
+    useState<GovernanceReview | null>(null);
 
   const timers = useRef<ReturnType<typeof setTimeout>[]>([]);
   const requestVersion = useRef(0);
@@ -123,6 +123,7 @@ export function ShoppingRequest() {
     setError(null);
 
     const requestMissing = text.length === 0;
+
     const budgetMissing =
       budget.trim().length === 0 ||
       !Number.isFinite(amount) ||
@@ -140,7 +141,9 @@ export function ShoppingRequest() {
       } else if (requestMissing) {
         setError("Enter what the company needs before submitting.");
       } else {
-        setError("Enter a positive budget cap with at most two decimal places.");
+        setError(
+          "Enter a positive budget cap with at most two decimal places.",
+        );
       }
 
       return;
@@ -179,7 +182,9 @@ export function ShoppingRequest() {
       });
 
       if (!parserResponse.ok) {
-        throw new Error(`AI parser request failed (${parserResponse.status}).`);
+        throw new Error(
+          `AI parser request failed (${parserResponse.status}).`,
+        );
       }
 
       const result = (await parserResponse.json()) as ParserResponse;
@@ -211,11 +216,11 @@ export function ShoppingRequest() {
         !Number.isFinite(parsed.quantity) ||
         parsed.quantity <= 0
       ) {
-        throw new Error("AI parser returned incomplete purchasing information.");
+        throw new Error(
+          "AI parser returned incomplete purchasing information.",
+        );
       }
 
-      // The form's budget is the user's requested cap.
-      // Do not silently replace it with an AI-generated amount.
       if (Math.abs(parsed.budget.amount - amount) > 0.001) {
         throw new Error(
           "The AI interpreted a different budget. Please clarify your request.",
@@ -253,7 +258,7 @@ export function ShoppingRequest() {
         requires_human_approval: boolean;
         payment_authorized: boolean;
       };
-      
+
       const review: GovernanceReview = {
         ...rawReview,
         status:
@@ -261,13 +266,13 @@ export function ShoppingRequest() {
             ? "REVIEW"
             : rawReview.status,
       };
-      
+
       if (requestVersion.current !== version) return;
-      
+
       if (!["ALLOW", "BLOCK", "REVIEW"].includes(review.status)) {
         throw new Error("Unexpected governance review response.");
       }
-      
+
       if (review.payment_authorized !== false) {
         throw new Error(
           "Governance review cannot independently authorize payment.",
@@ -277,7 +282,7 @@ export function ShoppingRequest() {
       clearTimers();
       setGovernance(review);
 
-      // These are sample products only, not live inventory.
+      // Sample products only. Live inventory is not connected yet.
       setProducts(mockProducts(text, amount, quality));
       setPhase("results");
     } catch (err) {
@@ -288,6 +293,7 @@ export function ShoppingRequest() {
       setPhase("error");
       setGovernance(null);
       setProducts([]);
+
       setError(
         err instanceof Error
           ? err.message
@@ -300,10 +306,30 @@ export function ShoppingRequest() {
     phase === "error" && request.trim().length === 0;
 
   const cap = Number(budget);
+
   const capReady =
     budget.trim().length > 0 &&
     Number.isFinite(cap) &&
     cap > 0;
+
+  const proposedSpend = governance
+    ? Number(governance.proposed_budget_usd)
+    : null;
+
+  const remainingAuthority =
+    capReady && proposedSpend !== null
+      ? cap - proposedSpend
+      : null;
+
+  const authorityUsed =
+    capReady && proposedSpend !== null && cap > 0
+      ? Math.min((proposedSpend / cap) * 100, 100)
+      : 0;
+
+  const exceedsAuthority =
+    proposedSpend !== null &&
+    capReady &&
+    proposedSpend > cap;
 
   const budgetInvalid =
     phase === "error" &&
@@ -317,8 +343,8 @@ export function ShoppingRequest() {
           <CardHeader>
             <CardTitle>Request for the agent</CardTitle>
             <CardDescription>
-            Define the business task and security boundaries. The agent can act
-            autonomously only within the authority granted here.
+              Define the business task and security boundaries. The agent
+              can act autonomously only within the authority granted here.
             </CardDescription>
           </CardHeader>
 
@@ -330,7 +356,7 @@ export function ShoppingRequest() {
             >
               <div className="flex flex-col gap-2">
                 <Label htmlFor="shopping-request">
-                What is the agent authorized to do?
+                  What is the agent authorized to do?
                 </Label>
 
                 <Textarea
@@ -343,15 +369,18 @@ export function ShoppingRequest() {
                   aria-describedby={
                     error ? "shopping-error" : undefined
                   }
-                  onChange={(event) => setRequest(event.target.value)}
+                  onChange={(event) =>
+                    setRequest(event.target.value)
+                  }
                   className="min-h-28"
                 />
               </div>
 
               <div className="flex flex-col gap-2">
-              <Label htmlFor="shopping-budget">
-                Maximum spending authority
-              </Label>
+                <Label htmlFor="shopping-budget">
+                  Maximum spending authority
+                </Label>
+
                 <div className="relative max-w-xs">
                   <span className="pointer-events-none absolute top-1/2 left-2.5 -translate-y-1/2 text-sm text-muted-foreground">
                     $
@@ -370,13 +399,15 @@ export function ShoppingRequest() {
                     aria-describedby={
                       error ? "shopping-error" : undefined
                     }
-                    onChange={(event) => setBudget(event.target.value)}
+                    onChange={(event) =>
+                      setBudget(event.target.value)
+                    }
                     className="pl-6"
                   />
                 </div>
 
                 <p className="text-xs text-muted-foreground">
-                Transactions above this limit are blocked by policy.
+                  Transactions above this limit are blocked by policy.
                 </p>
               </div>
 
@@ -428,7 +459,9 @@ export function ShoppingRequest() {
                         key={trait.id}
                         type="button"
                         size="sm"
-                        variant={selected ? "default" : "outline"}
+                        variant={
+                          selected ? "default" : "outline"
+                        }
                         aria-pressed={selected}
                         onClick={() => toggleTrait(trait.id)}
                       >
@@ -463,7 +496,9 @@ export function ShoppingRequest() {
                         <div
                           className={cn(
                             "mb-2 h-1.5 rounded-full",
-                            reached ? "bg-primary" : "bg-muted",
+                            reached
+                              ? "bg-primary"
+                              : "bg-muted",
                           )}
                         />
 
@@ -513,6 +548,7 @@ export function ShoppingRequest() {
               <CardHeader>
                 <div className="flex flex-wrap items-center justify-between gap-3">
                   <CardTitle>Spending Governance</CardTitle>
+
                   <Badge
                     variant={
                       governance.status === "BLOCK"
@@ -531,12 +567,12 @@ export function ShoppingRequest() {
                 </div>
 
                 <CardDescription>
-                {governance.status === "ALLOW"
-                  ? "This action passed the configured governance policies."
-                  : governance.status === "BLOCK"
-                    ? "SpendPilot blocked this action because it violated policy."
-                    : "This action requires human approval before it can continue."}
-              </CardDescription>
+                  {governance.status === "ALLOW"
+                    ? "This action passed the configured governance policies."
+                    : governance.status === "BLOCK"
+                      ? "SpendPilot blocked this action because it violated policy."
+                      : "This action requires human approval before it can continue."}
+                </CardDescription>
               </CardHeader>
 
               <CardContent className="flex flex-col gap-4">
@@ -557,12 +593,12 @@ export function ShoppingRequest() {
                       Approval status
                     </dt>
                     <dd className="font-medium">
-                    {governance.status === "ALLOW"
-                      ? "No review required"
-                      : governance.status === "BLOCK"
-                        ? "Blocked automatically"
-                        : "Human review required"}
-                  </dd>
+                      {governance.status === "ALLOW"
+                        ? "No review required"
+                        : governance.status === "BLOCK"
+                          ? "Blocked automatically"
+                          : "Human review required"}
+                    </dd>
                   </div>
 
                   <div>
@@ -585,9 +621,8 @@ export function ShoppingRequest() {
                 </p>
 
                 <p className="text-xs text-muted-foreground">
-                  This is a preliminary governance review.
-                  No approval request has been submitted to a human
-                  reviewer, and no payment has been initiated.
+                  This is a preliminary governance review. No payment
+                  has been initiated.
                 </p>
               </CardContent>
             </Card>
@@ -656,26 +691,100 @@ export function ShoppingRequest() {
 
             <p className="text-xs text-muted-foreground">
               Sample options for review. Live search is not
-              connected, prices are per item, and no payment
-              is taken. Multiple units may exceed the total
-              request budget.
+              connected, prices are per item, and no payment is
+              taken. Multiple units may exceed the total request
+              budget.
             </p>
           </section>
         ) : null}
       </div>
 
       <aside className="rounded-xl bg-card p-4 text-sm ring-1 ring-foreground/10">
-        <p className="font-medium">
-          Active guardrails
-        </p>
+        <p className="font-medium">Active guardrails</p>
 
-        <dl className="mt-4 flex flex-col gap-3">
-          <div>
-            <dt className="text-muted-foreground">
+        <dl className="mt-4 flex flex-col gap-4">
+          <div className="flex flex-col gap-3">
+            <dt className="font-medium">
               Spending authority
             </dt>
-            <dd className="font-medium">
-              {capReady ? money.format(cap) : "Not set"}
+
+            <dd className="flex flex-col gap-2">
+              <div className="flex justify-between gap-4">
+                <span className="text-muted-foreground">
+                  Authorized
+                </span>
+                <span className="font-medium">
+                  {capReady
+                    ? money.format(cap)
+                    : "Not set"}
+                </span>
+              </div>
+
+              <div className="flex justify-between gap-4">
+                <span className="text-muted-foreground">
+                  Proposed
+                </span>
+                <span className="font-medium">
+                  {proposedSpend !== null
+                    ? money.format(proposedSpend)
+                    : "Not reviewed"}
+                </span>
+              </div>
+
+              {remainingAuthority !== null ? (
+                <div className="flex justify-between gap-4">
+                  <span className="text-muted-foreground">
+                    {exceedsAuthority
+                      ? "Over limit"
+                      : "Remaining"}
+                  </span>
+
+                  <span
+                    className={cn(
+                      "font-medium",
+                      exceedsAuthority &&
+                        "text-destructive",
+                    )}
+                  >
+                    {money.format(
+                      Math.abs(remainingAuthority),
+                    )}
+                  </span>
+                </div>
+              ) : null}
+
+              {proposedSpend !== null && capReady ? (
+                <div className="pt-1">
+                  <div className="h-2 overflow-hidden rounded-full bg-muted">
+                    <div
+                      className={cn(
+                        "h-full rounded-full transition-all",
+                        exceedsAuthority
+                          ? "bg-destructive"
+                          : "bg-primary",
+                      )}
+                      style={{
+                        width: `${authorityUsed}%`,
+                      }}
+                    />
+                  </div>
+
+                  <p
+                    className={cn(
+                      "mt-2 text-xs",
+                      exceedsAuthority
+                        ? "font-medium text-destructive"
+                        : "text-muted-foreground",
+                    )}
+                  >
+                    {exceedsAuthority
+                      ? "Exceeds agent spending authority"
+                      : `${Math.round(
+                          authorityUsed,
+                        )}% of spending authority`}
+                  </p>
+                </div>
+              ) : null}
             </dd>
           </div>
 
@@ -690,6 +799,7 @@ export function ShoppingRequest() {
             <dt className="text-muted-foreground">
               Security policies
             </dt>
+
             <dd>
               {traits.length > 0
                 ? traits
@@ -709,10 +819,15 @@ export function ShoppingRequest() {
             <dt className="text-muted-foreground">
               Governance
             </dt>
-            <dd>
-              {governance
-                ? "Human review required"
-                : "Not yet reviewed"}
+
+            <dd className="font-medium">
+              {!governance
+                ? "Not yet reviewed"
+                : governance.status === "ALLOW"
+                  ? "Policy passed"
+                  : governance.status === "BLOCK"
+                    ? "Blocked automatically"
+                    : "Human review required"}
             </dd>
           </div>
 
@@ -720,7 +835,7 @@ export function ShoppingRequest() {
             <dt className="text-muted-foreground">
               Payment
             </dt>
-            <dd>Not taken on this page</dd>
+            <dd>Not authorized by governance review</dd>
           </div>
         </dl>
       </aside>

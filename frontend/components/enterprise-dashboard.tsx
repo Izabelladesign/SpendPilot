@@ -58,6 +58,11 @@ function statusLabel(status: string): string {
   return status.replaceAll("_", " ").toLowerCase().replace(/(^| )\S/g, (letter) => letter.toUpperCase());
 }
 
+function linkedJiraKey(task: Task): string | null {
+  const key = task.output?.jiraIssueKey;
+  return typeof key === "string" && key.length > 0 ? key : null;
+}
+
 function executionStatusVariant(status: string): "default" | "secondary" | "outline" | "destructive" {
   if (["SETTLED", "SIMULATED", "APPROVED", "VERIFIED", "COMPLETED"].includes(status)) return "default";
   if (["FAILED", "BLOCK", "REJECTED", "FAILED_VERIFICATION"].includes(status)) return "destructive";
@@ -167,7 +172,7 @@ export function EnterpriseDashboard() {
         </Button>
       </div>
 
-      <EnterpriseIntake onTaskUpdated={handleTaskUpdated} />
+      <EnterpriseIntake selectedTask={selectedTask} onTaskUpdated={handleTaskUpdated} />
 
       <AgentControlCenter
         task={selectedTask}
@@ -227,7 +232,9 @@ export function EnterpriseDashboard() {
                   >
                     <div className="min-w-0">
                       <p className="truncate font-medium">{task.objective}</p>
-                      <p className="mt-1 text-xs text-muted-foreground">Updated {formatDate(task.updatedAt)}</p>
+                      <p className="mt-1 text-xs text-muted-foreground">
+                        {linkedJiraKey(task) ? `Jira ${linkedJiraKey(task)} · ` : ""}Updated {formatDate(task.updatedAt)}
+                      </p>
                     </div>
                     <Badge variant={statusVariant(task.status)}>{statusLabel(task.status)}</Badge>
                   </button>

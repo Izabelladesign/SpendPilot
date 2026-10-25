@@ -1,8 +1,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createOpenAIExtractor, parseSpendRequestWithExtractor } from '../src/spend-intake.js';
-import { createJiraSpendRequest } from '../src/jira-spend-request.js';
-import { resolver } from '../src/index.js';
+import { createJiraSpendRequest, linkExistingJiraSpendRequest } from '../src/jira-spend-request.js';
+import { parseSpendRequest, resolver } from '../src/index.js';
 
 const completeTask = {
   requestedItemOrService: 'Ergonomic keyboards', purchasingIntent: 'Purchase equipment', quantity: 12,
@@ -25,6 +25,18 @@ test('missing required fields returns clarification questions', async () => {
 test('ambiguity remains unresolved rather than guessed', async () => {
   const result = await withOutput({ ...completeTask, quantity: null, ambiguities: ['It is unclear whether one or several licenses are needed.'] });
   assert.equal(result.isReadyForNextStep, false); assert.equal(result.parsedTask.quantity, null);
+});
+test('explicit scope, deadline, and security criteria do not trigger clarification', async () => {
+  const result = await parseSpendRequestWithExtractor({ request: `We need a managed coding assistant for a 50-person engineering team. Compare GitHub Copilot and Cursor, keep the research budget under 1.00 USD, include pricing and security sources, and require human approval before any purchase.
+Research deadline: complete the comparison within 5 minutes (Pacific Standard Time).
+Security criteria: compare SSO/SAML, SCIM, SOC 2 or ISO 27001 coverage, encryption, data retention, whether code is used for model training, admin controls, audit logs, and data residency.
+Alternatives should not be considered. Detail level doesn't matter.` }, async () => ({
+    ...completeTask,
+    deadline: 'Within 5 minutes (Pacific Standard Time)',
+    ambiguities: ['It is unclear whether alternatives should be considered.', 'Security criteria may need clarification.', 'Detail level was not specified.'],
+  }));
+  assert.equal(result.isReadyForNextStep, true);
+  assert.deepEqual(result.clarificationQuestions, []);
 });
 test('invalid quantity, budget, and currency are rejected', async () => {
   const quantity = await withOutput({ ...completeTask, quantity: 0 });
@@ -78,6 +90,21 @@ test('project-page resolver exposes the read-only OpenAI parser', async () => {
   assert.equal(typeof resolver, 'function');
 });
 
+test('demo shortcut returns a complete local request without OpenAI', async () => {
+  const result = await parseSpendRequest({ request: 'dummy prompt' });
+  assert.equal(result.isReadyForNextStep, true);
+  assert.equal(result.parsedTask.requestedItemOrService, 'Managed AI coding assistant');
+  assert.deepEqual(result.clarificationQuestions, []);
+});
+
+test('realistic demo wording uses the local fixture without clarification', async () => {
+  const result = await parseSpendRequest({
+    request: 'We need a managed coding assistant for a 50-person engineering team. Compare GitHub Copilot and Cursor and keep the research budget under 1.00 USD.',
+  });
+  assert.equal(result.isReadyForNextStep, true);
+  assert.equal(result.parsedTask.requestedItemOrService, 'Managed AI coding assistant');
+});
+
 test('Jira action creates a review issue without payment fields', async () => {
   let request;
   const result = await createJiraSpendRequest({
@@ -102,6 +129,43 @@ test('Jira action creates a review issue without payment fields', async () => {
   assert.match(body.fields.description.content[0].content[0].text, /Compare options/);
 });
 
+test('Jira action links the created issue to the backend without paying', async () => {
+  let backendRequest;
+  const result = await createJiraSpendRequest({
+    projectKey: 'KAN',
+    summary: 'Research coding assistants',
+    description: 'Research managed coding assistants for the engineering team.',
+    budget: '1.00 USD',
+    constraints: ['Human approval required'],
+    requestJira: async () => new Response(JSON.stringify({ id: '10004', key: 'KAN-4' }), { status: 201 }),
+    backendUrl: 'http://127.0.0.1:8000',
+    backendToken: 'test-sync-token',
+    requestBackend: async (url, options) => {
+      backendRequest = { url, options };
+      return new Response(JSON.stringify({
+        status: 'linked',
+        message: 'Linked Jira issue KAN-4 to backend task task-001.',
+        task: { id: 'task-001' },
+      }), { status: 201 });
+    },
+  });
+
+  assert.equal(result.status, 'created');
+  assert.equal(result.backend.status, 'linked');
+  assert.equal(result.backend.taskId, 'task-001');
+  assert.equal(backendRequest.url, 'http://127.0.0.1:8000/integrations/jira/spend-requests');
+  assert.equal(backendRequest.options.headers['X-SpendPilot-Sync-Token'], 'test-sync-token');
+  const body = JSON.parse(backendRequest.options.body);
+  assert.deepEqual(body, {
+    jiraIssueKey: 'KAN-4',
+    objective: 'Research managed coding assistants for the engineering team.',
+    budget: { amount: '1.00', currency: 'USD' },
+    quantity: 1,
+    qualityTarget: 'Return a sourced recommendation for human review.',
+    constraints: ['Human approval required'],
+  });
+});
+
 test('Jira action fails safely when Jira rejects the request', async () => {
   const result = await createJiraSpendRequest({
     projectKey: 'SP',
@@ -114,4 +178,43 @@ test('Jira action fails safely when Jira rejects the request', async () => {
   assert.equal(result.status, 'jira_error');
   assert.equal(result.issueKey, null);
   assert.match(result.message, /permissions/i);
+});
+
+test('existing Jira issue can be linked to the backend without creating a duplicate', async () => {
+  let backendRequest;
+  const result = await linkExistingJiraSpendRequest({
+    issueKey: 'KAN-4',
+    requestJira: async (path) => {
+      assert.match(String(path.value_ || path), /KAN-4/);
+      return new Response(JSON.stringify({
+        key: 'KAN-4',
+        fields: {
+          summary: 'Research coding assistants',
+          description: {
+            type: 'doc',
+            content: [
+              { type: 'paragraph', content: [{ type: 'text', text: 'Research coding assistants.' }] },
+              { type: 'paragraph', content: [{ type: 'text', text: 'Budget: 1.00 USD' }] },
+              { type: 'paragraph', content: [{ type: 'text', text: 'Constraints: Human approval required' }] },
+            ],
+          },
+        },
+      }), { status: 200 });
+    },
+    backendUrl: 'http://127.0.0.1:8000',
+    requestBackend: async (url, options) => {
+      backendRequest = { url, options };
+      return new Response(JSON.stringify({
+        status: 'already_linked',
+        message: 'KAN-4 already linked.',
+        task: { id: 'task-001' },
+      }), { status: 201 });
+    },
+  });
+
+  assert.equal(result.status, 'linked');
+  assert.equal(result.issueKey, 'KAN-4');
+  assert.equal(result.backend.taskId, 'task-001');
+  assert.equal(backendRequest.url, 'http://127.0.0.1:8000/integrations/jira/spend-requests');
+  assert.equal(JSON.parse(backendRequest.options.body).jiraIssueKey, 'KAN-4');
 });

@@ -1,4 +1,5 @@
 node_modules
+.forge
 .env
 .forgerc
 package-lock.json

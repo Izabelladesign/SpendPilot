@@ -70,6 +70,40 @@ def test_create_and_get_task(client: TestClient) -> None:
     assert response.json()["id"] == created["id"]
 
 
+def test_jira_spend_request_sync_links_task_and_is_idempotent(client: TestClient) -> None:
+    payload = {
+        "jiraIssueKey": "KAN-4",
+        "objective": "Research a managed coding assistant for the engineering team.",
+        "budget": {"amount": "1.00", "currency": "USD"},
+        "quantity": 50,
+        "qualityTarget": "Return sourced pricing and security findings.",
+        "constraints": ["Human approval required"],
+    }
+
+    first = client.post("/integrations/jira/spend-requests", json=payload)
+    assert first.status_code == 201, first.text
+    assert first.json()["status"] == "linked"
+    assert first.json()["jiraIssueKey"] == "KAN-4"
+    task_id = first.json()["task"]["id"]
+    assert first.json()["task"]["output"] == {
+        "source": "forge_jira",
+        "jiraIssueKey": "KAN-4",
+        "approvalRequired": True,
+        "purchaseAuthorized": False,
+    }
+
+    second = client.post("/integrations/jira/spend-requests", json=payload)
+    assert second.status_code == 201, second.text
+    assert second.json()["status"] == "already_linked"
+    assert second.json()["task"]["id"] == task_id
+
+    events = client.get(f"/tasks/{task_id}/events")
+    assert [event["type"] for event in events.json()["items"]] == [
+        "TASK_CREATED",
+        "JIRA_REQUEST_LINKED",
+    ]
+
+
 def test_list_tasks_supports_status_filter(client: TestClient) -> None:
     created = create_task(client)
 

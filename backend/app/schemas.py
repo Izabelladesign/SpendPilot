@@ -66,6 +66,36 @@ class TaskResponse(APIModel):
     updated_at: datetime = Field(alias="updatedAt")
 
 
+class JiraSpendRequestSync(APIModel):
+    """Structured intake received after a Jira review issue is created."""
+
+    jira_issue_key: str = Field(
+        alias="jiraIssueKey",
+        pattern=r"^[A-Z][A-Z0-9_]*-\d+$",
+        min_length=3,
+        max_length=255,
+    )
+    objective: str = Field(min_length=1, max_length=10_000)
+    budget: Money
+    quantity: Decimal | None = Field(default=None, gt=0)
+    quality_target: str | None = Field(default=None, alias="qualityTarget", max_length=10_000)
+    constraints: list[str] = Field(default_factory=list)
+
+    @field_validator("objective")
+    @classmethod
+    def objective_must_not_be_blank(cls, value: str) -> str:
+        if not value.strip():
+            raise ValueError("Objective must not be blank.")
+        return value.strip()
+
+
+class JiraSpendRequestSyncResponse(APIModel):
+    status: str
+    jira_issue_key: str = Field(alias="jiraIssueKey")
+    task: TaskResponse
+    message: str
+
+
 class TaskListResponse(APIModel):
     items: list[TaskResponse]
     next_cursor: str | None = Field(default=None, alias="nextCursor")

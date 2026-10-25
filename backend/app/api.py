@@ -3,6 +3,8 @@
 
 from __future__ import annotations
 
+import hmac
+import os
 from datetime import datetime, timezone
 from decimal import Decimal
 from uuid import uuid4
@@ -35,6 +37,8 @@ from app.schemas import (
     EventListResponse,
     ExecuteTaskRequest,
     ExecutionSummaryResponse,
+    JiraSpendRequestSync,
+    JiraSpendRequestSyncResponse,
     PaymentListResponse,
     PaymentResponse,
     PurchaseRequestStatusResponse,
@@ -120,6 +124,77 @@ def _task_response(task: Task) -> TaskResponse:
         createdAt=task.created_at,
         updatedAt=task.updated_at,
     )
+
+
+def _create_task_record(
+    payload: CreateTaskRequest | JiraSpendRequestSync,
+    request: Request,
+    db: Session,
+    *,
+    event_type: str = "TASK_CREATED",
+    event_message: str = "Task received",
+    event_metadata: dict[str, object] | None = None,
+) -> Task:
+    """Create the shared task record used by direct and Jira intake."""
+
+    user_id = getattr(payload, "user_id", None)
+    budget_id = getattr(payload, "budget_id", None)
+    user = db.get(User, user_id) if user_id else _demo_user(db)
+
+    if user is None:
+        raise _error("not_found", "User was not found.", request, 404)
+
+    budget = db.get(Budget, budget_id) if budget_id else None
+
+    if budget_id and budget is None:
+        raise _error("not_found", "Budget was not found.", request, 404)
+
+    if budget and budget.owner_id != user.id:
+        raise _error(
+            "forbidden",
+            "The budget does not belong to the user.",
+            request,
+            403,
+        )
+
+    if budget and budget.currency != payload.budget.currency:
+        raise _error(
+            "validation_error",
+            "Task and budget currencies must match.",
+            request,
+            422,
+        )
+
+    if budget is None:
+        budget = Budget(
+            owner_id=user.id,
+            name=f"Task budget: {payload.objective[:150]}",
+            currency=payload.budget.currency,
+            total=payload.budget.amount,
+        )
+        db.add(budget)
+        db.flush()
+
+    task = Task(
+        user_id=user.id,
+        budget_id=budget.id,
+        objective=payload.objective,
+        quantity=payload.quantity,
+        quality_target=payload.quality_target,
+        constraints=payload.constraints,
+    )
+
+    db.add(task)
+    db.flush()
+    db.add(
+        AgentEvent(
+            task_id=task.id,
+            event_type=event_type,
+            message=event_message,
+            metadata_json=event_metadata or {},
+        )
+    )
+    return task
 
 
 def _event_response(event: AgentEvent) -> AgentEventResponse:
@@ -212,67 +287,90 @@ def create_task(
     request: Request,
     db: Session = Depends(get_db),
 ) -> TaskResponse:
-    user = db.get(User, payload.user_id) if payload.user_id else _demo_user(db)
-
-    if user is None:
-        raise _error("not_found", "User was not found.", request, 404)
-
-    budget = db.get(Budget, payload.budget_id) if payload.budget_id else None
-
-    if payload.budget_id and budget is None:
-        raise _error("not_found", "Budget was not found.", request, 404)
-
-    if budget and budget.owner_id != user.id:
-        raise _error(
-            "forbidden",
-            "The budget does not belong to the user.",
-            request,
-            403,
-        )
-
-    if budget and budget.currency != payload.budget.currency:
-        raise _error(
-            "validation_error",
-            "Task and budget currencies must match.",
-            request,
-            422,
-        )
-
-    if budget is None:
-        budget = Budget(
-            owner_id=user.id,
-            name=f"Task budget: {payload.objective[:150]}",
-            currency=payload.budget.currency,
-            total=payload.budget.amount,
-        )
-        db.add(budget)
-        db.flush()
-
-    task = Task(
-        user_id=user.id,
-        budget_id=budget.id,
-        objective=payload.objective,
-        quantity=payload.quantity,
-        quality_target=payload.quality_target,
-        constraints=payload.constraints,
-    )
-
-    db.add(task)
-    db.flush()
-
-    db.add(
-        AgentEvent(
-            task_id=task.id,
-            event_type="TASK_CREATED",
-            message="Task received",
-            metadata_json={},
-        )
-    )
+    task = _create_task_record(payload, request, db)
 
     db.commit()
     db.refresh(task)
 
     return _task_response(task)
+
+
+@router.post(
+    "/integrations/jira/spend-requests",
+    response_model=JiraSpendRequestSyncResponse,
+    status_code=status.HTTP_201_CREATED,
+    summary="Link a Jira spend request to a backend task",
+    description=(
+        "Creates or returns a local task record linked to an existing Jira review issue. "
+        "This endpoint never approves, purchases, reserves real funds, or charges money."
+    ),
+)
+def sync_jira_spend_request(
+    payload: JiraSpendRequestSync,
+    request: Request,
+    db: Session = Depends(get_db),
+) -> JiraSpendRequestSyncResponse:
+    """Bridge the Forge-created Jira issue into the shared task timeline."""
+
+    expected_token = os.getenv("SPENDPILOT_JIRA_SYNC_TOKEN")
+    supplied_token = request.headers.get("x-spendpilot-sync-token", "")
+    if expected_token and not hmac.compare_digest(supplied_token, expected_token):
+        raise _error("unauthorized", "The Jira sync token is invalid.", request, 401)
+
+    linked_event = (
+        db.query(AgentEvent)
+        .filter(AgentEvent.event_type == "JIRA_REQUEST_LINKED")
+        .all()
+    )
+    for event in linked_event:
+        if event.metadata_json.get("jiraIssueKey") == payload.jira_issue_key:
+            task = db.get(Task, event.task_id)
+            if task is not None:
+                return JiraSpendRequestSyncResponse(
+                    status="already_linked",
+                    jiraIssueKey=payload.jira_issue_key,
+                    task=_task_response(task),
+                    message=f"Jira issue {payload.jira_issue_key} is already linked to this task.",
+                )
+
+    task = _create_task_record(
+        payload,
+        request,
+        db,
+        event_metadata={
+            "source": "forge_jira",
+            "jiraIssueKey": payload.jira_issue_key,
+        },
+    )
+    task.output = {
+        "source": "forge_jira",
+        "jiraIssueKey": payload.jira_issue_key,
+        "approvalRequired": True,
+        "purchaseAuthorized": False,
+    }
+    db.add(
+        AgentEvent(
+            task_id=task.id,
+            event_type="JIRA_REQUEST_LINKED",
+            message=f"Linked Jira review issue {payload.jira_issue_key} to the task",
+            metadata_json={
+                "jiraIssueKey": payload.jira_issue_key,
+                "source": "forge_jira",
+            },
+        )
+    )
+    db.commit()
+    db.refresh(task)
+
+    return JiraSpendRequestSyncResponse(
+        status="linked",
+        jiraIssueKey=payload.jira_issue_key,
+        task=_task_response(task),
+        message=(
+            f"Jira issue {payload.jira_issue_key} is linked to backend task {task.id}. "
+            "Approval and purchase remain separate."
+        ),
+    )
 
 
 @router.get("/tasks", response_model=TaskListResponse)

@@ -25,14 +25,15 @@ import { Textarea } from "@/components/ui/textarea";
 
 type EnterpriseIntakeProps = {
   onTaskUpdated: (task: Task) => void;
+  selectedTask?: Task | null;
 };
 
-export function EnterpriseIntake({ onTaskUpdated }: EnterpriseIntakeProps) {
+export function EnterpriseIntake({ onTaskUpdated, selectedTask = null }: EnterpriseIntakeProps) {
   const [objective, setObjective] = useState(
     "Compare GitHub Copilot and Cursor for a 50-person engineering team",
   );
   const [budget, setBudget] = useState("1.00");
-  const [task, setTask] = useState<Task | null>(null);
+  const [createdTask, setCreatedTask] = useState<Task | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -48,7 +49,7 @@ export function EnterpriseIntake({ onTaskUpdated }: EnterpriseIntakeProps) {
         qualityTarget: "Include pricing, security, two HTTPS sources, and unverified information",
         constraints: ["Research task only", "Maximum USD 1.00"],
       });
-      setTask(created);
+      setCreatedTask(created);
       onTaskUpdated(created);
     } catch (requestError) {
       setError(requestError instanceof Error ? requestError.message : "Unable to submit the request.");
@@ -58,13 +59,13 @@ export function EnterpriseIntake({ onTaskUpdated }: EnterpriseIntakeProps) {
   }
 
   async function runLocalDemoResult() {
-    if (!task) return;
+    if (!activeTask) return;
     setBusy(true);
     setError(null);
     try {
-      const completed = await runLocalDemo(task.id);
+      const completed = await runLocalDemo(activeTask.id);
       const withDecisionPacket = await createLocalPurchasePreview(completed.id);
-      setTask(withDecisionPacket);
+      setCreatedTask(withDecisionPacket);
       onTaskUpdated(withDecisionPacket);
     } catch (requestError) {
       setError(requestError instanceof Error ? requestError.message : "Unable to verify the local demo result.");
@@ -74,12 +75,12 @@ export function EnterpriseIntake({ onTaskUpdated }: EnterpriseIntakeProps) {
   }
 
   async function createApprovalPacket() {
-    if (!task) return;
+    if (!activeTask) return;
     setBusy(true);
     setError(null);
     try {
-      const withDecisionPacket = await createLocalPurchasePreview(task.id);
-      setTask(withDecisionPacket);
+      const withDecisionPacket = await createLocalPurchasePreview(activeTask.id);
+      setCreatedTask(withDecisionPacket);
       onTaskUpdated(withDecisionPacket);
     } catch (requestError) {
       setError(requestError instanceof Error ? requestError.message : "Unable to create the approval packet.");
@@ -89,12 +90,12 @@ export function EnterpriseIntake({ onTaskUpdated }: EnterpriseIntakeProps) {
   }
 
   async function approveDemoRequest() {
-    if (!task) return;
+    if (!activeTask) return;
     setBusy(true);
     setError(null);
     try {
-      const approved = await approveLocalPurchase(task.id);
-      setTask(approved);
+      const approved = await approveLocalPurchase(activeTask.id);
+      setCreatedTask(approved);
       onTaskUpdated(approved);
     } catch (requestError) {
       setError(requestError instanceof Error ? requestError.message : "Unable to approve the demo request.");
@@ -104,12 +105,12 @@ export function EnterpriseIntake({ onTaskUpdated }: EnterpriseIntakeProps) {
   }
 
   async function simulatePayment() {
-    if (!task) return;
+    if (!activeTask) return;
     setBusy(true);
     setError(null);
     try {
-      const paid = await simulateLocalPayment(task.id);
-      setTask(paid);
+      const paid = await simulateLocalPayment(activeTask.id);
+      setCreatedTask(paid);
       onTaskUpdated(paid);
     } catch (requestError) {
       setError(requestError instanceof Error ? requestError.message : "Unable to simulate the payment stage.");
@@ -118,7 +119,8 @@ export function EnterpriseIntake({ onTaskUpdated }: EnterpriseIntakeProps) {
     }
   }
 
-  const decisionPacket = task?.output?.decisionPacket as {
+  const activeTask = selectedTask ?? createdTask;
+  const decisionPacket = activeTask?.output?.decisionPacket as {
     purchaseRequestId?: string;
     approvalId?: string;
     approvalStatus?: string;
@@ -164,16 +166,16 @@ export function EnterpriseIntake({ onTaskUpdated }: EnterpriseIntakeProps) {
           </Button>
         </form>
 
-        {task ? (
+        {activeTask ? (
           <div className="flex flex-col gap-3 rounded-lg border bg-muted/30 p-4">
             <div className="flex flex-wrap items-center justify-between gap-3">
               <div>
                 <p className="text-sm font-medium">Request submitted</p>
                 <p className="text-xs text-muted-foreground">The request is captured. Run the safe local scenario to see the recommendation, guardrails, and verification flow.</p>
               </div>
-              <Badge variant={task.status === "COMPLETED" ? "default" : "outline"}>
-                {task.status === "COMPLETED" ? <CheckCircle2 /> : <AlertCircle />}
-                {task.status.replaceAll("_", " ")}
+              <Badge variant={activeTask.status === "COMPLETED" ? "default" : "outline"}>
+                {activeTask.status === "COMPLETED" ? <CheckCircle2 /> : <AlertCircle />}
+                {activeTask.status.replaceAll("_", " ")}
               </Badge>
             </div>
             {decisionPacket ? (
@@ -200,13 +202,13 @@ export function EnterpriseIntake({ onTaskUpdated }: EnterpriseIntakeProps) {
                   <p className="text-xs text-muted-foreground">Payment stage shown for the demo only. No wallet, chain transaction, provider, or funds were touched.</p>
                 ) : null}
               </div>
-            ) : task.output?.demoRun ? (
+            ) : activeTask.output?.demoRun ? (
               <Button type="button" variant="outline" onClick={() => void createApprovalPacket()} disabled={busy} className="w-fit">
                 <Play />
                 Create approval packet
               </Button>
             ) : (
-              <Button type="button" variant="outline" onClick={() => void runLocalDemoResult()} disabled={busy || task.status === "COMPLETED"} className="w-fit">
+              <Button type="button" variant="outline" onClick={() => void runLocalDemoResult()} disabled={busy || activeTask.status === "COMPLETED"} className="w-fit">
                 <Play />
                 Run safe local agent simulation
               </Button>

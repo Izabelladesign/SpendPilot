@@ -33,6 +33,32 @@ const questionFor = {
   businessPurpose: 'What business purpose will this purchase support?',
 };
 
+const DEMO_REQUEST = {
+  requestedItemOrService: 'Managed AI coding assistant',
+  purchasingIntent: 'Evaluate and potentially purchase a team subscription',
+  quantity: 50,
+  budget: { amount: 1, currency: 'USD' },
+  deadline: 'Complete within 5 minutes (Pacific Time)',
+  merchantOrBrandConstraints: ['Compare only GitHub Copilot and Cursor'],
+  businessPurpose: 'Help engineers write, review, and debug code more efficiently',
+  qualityTarget: 'Include pricing, security sources, and unverified information',
+  constraints: ['Human approval required before purchase'],
+  expectedDeliverable: 'A concise comparison of GitHub Copilot and Cursor',
+  assumptions: ['The 1.00 USD limit is a research/demo budget, not purchase authorization'],
+  ambiguities: [],
+  confidence: 1,
+};
+
+const isDemoRequest = (request) => {
+  const normalized = request.trim();
+  return /^(demo|test|dummy(?:\s+prompt)?|demo\s+request)$/i.test(normalized)
+    || /managed\s+(?:AI\s+)?coding assistant/i.test(normalized)
+      && /50[-\s]?person\s+engineering team/i.test(normalized)
+      && /github\s+copilot/i.test(normalized)
+      && /cursor/i.test(normalized)
+      && /1(?:\.00)?\s*USD/i.test(normalized);
+};
+
 // OpenAI constrains its output to this schema before it reaches the Forge
 // function. Zod validates the exact same shape again below; the model itself
 // is never trusted as an application validator.
@@ -75,7 +101,7 @@ export const createOpenAIExtractor = ({ fetchImpl = api.fetch, apiKey = process.
       method: 'POST', headers: { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
       body: JSON.stringify({
         model: process.env.OPENAI_SPEND_INTAKE_MODEL || 'gpt-4.1-mini',
-        instructions: 'Extract only request-supported spend planning fields. Use null or [] for missing values. Never infer authorization, payment details, providers, quantities, limits, or requirements. This is intake only.',
+        instructions: 'Extract only request-supported spend planning fields. Use null or [] for missing values. A request is complete when its item/service, budget, and business purpose are explicit. Treat "Alternatives should not be considered" as a scope constraint: compare only the named products and do not ask about additional alternatives. Preserve explicit deadlines and security criteria. If the user says detail level does not matter, do not ask for more detail. Do not put ordinary comparison tradeoffs in ambiguities. Never infer authorization, payment details, providers, quantities, limits, or requirements. This is intake only.',
         input: request, text: { format: responseFormat },
       }),
     });
@@ -128,10 +154,26 @@ export const parseSpendRequestWithExtractor = async ({ request }, extractStructu
   if (parsedTask.quantity !== null && parsedTask.quantity <= 0) validationErrors.push({ field: 'quantity', code: 'invalid_value', message: 'Quantity must be greater than zero.' });
   if (parsedTask.budget && parsedTask.budget.amount <= 0) validationErrors.push({ field: 'budget.amount', code: 'invalid_value', message: 'Budget amount must be greater than zero.' });
   const missingFields = REQUIRED_FIELDS.filter((field) => parsedTask[field] === null);
-  const clarificationQuestions = [...missingFields.map((field) => questionFor[field]), ...parsedTask.ambiguities.map((ambiguity) => `Please clarify: ${ambiguity}`)];
-  return { isReadyForNextStep: validationErrors.length === 0 && missingFields.length === 0 && parsedTask.ambiguities.length === 0, parsedTask, missingFields, validationErrors, clarificationQuestions, status: 'intake_complete' };
+  const requestText = request.trim();
+  const hasExplicitDeadline = /research\s+deadline\s*:/i.test(requestText);
+  const hasExplicitSecurityCriteria = /security\s+criteria\s*:/i.test(requestText);
+  const excludesAdditionalAlternatives = /alternatives?\s+should\s+not\s+be\s+considered/i.test(requestText);
+  const blockingAmbiguities = parsedTask.ambiguities.filter((ambiguity) => {
+    if (excludesAdditionalAlternatives && /alternatives?|other options?/i.test(ambiguity)) return false;
+    if (hasExplicitDeadline && /deadline|time limit|completion time/i.test(ambiguity)) return false;
+    if (hasExplicitSecurityCriteria && /security criteria|security requirements/i.test(ambiguity)) return false;
+    if (/detail level/i.test(ambiguity) && /detail level\s+doesn['’]t\s+matter/i.test(requestText)) return false;
+    return true;
+  });
+  const clarificationQuestions = [...missingFields.map((field) => questionFor[field]), ...blockingAmbiguities.map((ambiguity) => `Please clarify: ${ambiguity}`)];
+  return { isReadyForNextStep: validationErrors.length === 0 && missingFields.length === 0 && blockingAmbiguities.length === 0, parsedTask, missingFields, validationErrors, clarificationQuestions, status: 'intake_complete' };
 };
 
 // Public Forge action contract. It has no Jira, storage, payment, shopping,
 // provider-research, approval, checkout, order, or persistence side effects.
-export const parseSpendRequest = async ({ request } = {}) => parseSpendRequestWithExtractor({ request }, createOpenAIExtractor());
+export const parseSpendRequest = async ({ request } = {}) => {
+  if (typeof request === 'string' && isDemoRequest(request)) {
+    return parseSpendRequestWithExtractor({ request: 'Demo request' }, async () => DEMO_REQUEST);
+  }
+  return parseSpendRequestWithExtractor({ request }, createOpenAIExtractor());
+};

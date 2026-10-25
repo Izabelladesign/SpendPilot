@@ -5,7 +5,10 @@
 // explicitly asks for it. Neither action approves or pays for anything.
 
 import { parseSpendRequest as parseRequest } from './spend-intake.js';
-import { createJiraSpendRequest as createJiraIssue } from './jira-spend-request.js';
+import {
+  createJiraSpendRequest as createJiraIssue,
+  linkExistingJiraSpendRequest,
+} from './jira-spend-request.js';
 import { makeResolver } from '@forge/resolver';
 
 export const placeholder = async (payload, context) => {
@@ -24,8 +27,10 @@ export const placeholder = async (payload, context) => {
 export const parseSpendRequest = async (payload) => parseRequest(payload);
 
 export const createJiraSpendRequest = async (payload) => createJiraIssue(payload);
+export const syncJiraSpendRequest = async (payload) => linkExistingJiraSpendRequest(payload);
 
 export const resolver = makeResolver({
   parseSpendRequest: async ({ payload }) => parseRequest(payload),
   createJiraSpendRequest: async ({ payload }) => createJiraIssue(payload),
+  syncJiraSpendRequest: async ({ payload }) => linkExistingJiraSpendRequest(payload),
 });

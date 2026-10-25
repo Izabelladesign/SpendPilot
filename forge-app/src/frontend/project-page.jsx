@@ -17,6 +17,8 @@ const initialForm = {
   description: 'Research both products for a 50-person engineering team and return pricing, security, sources, and unknowns.',
   budget: '1.00 USD',
   constraints: 'Research only, human approval required',
+  quantity: 1,
+  qualityTarget: 'Return a sourced recommendation for human review.',
 };
 
 const initialRequest = 'We need a managed coding assistant for a 50-person engineering team. Compare GitHub Copilot and Cursor, keep the research budget under 1.00 USD, include pricing and security sources, and require human approval before any purchase.';
@@ -27,6 +29,8 @@ const ProjectPage = () => {
   const [parseResult, setParseResult] = useState(null);
   const [parsing, setParsing] = useState(false);
   const [busy, setBusy] = useState(false);
+  const [existingIssueKey, setExistingIssueKey] = useState('KAN-4');
+  const [linking, setLinking] = useState(false);
   const [result, setResult] = useState(null);
   const [error, setError] = useState('');
 
@@ -59,6 +63,8 @@ const ProjectPage = () => {
           ].filter(Boolean).join('\n'),
           budget: `${task.budget.amount.toFixed(2)} ${task.budget.currency}`,
           constraints: constraints.join(', '),
+          quantity: task.quantity || 1,
+          qualityTarget: task.qualityTarget || 'Return a sourced recommendation for human review.',
         }));
       }
     } catch {
@@ -83,6 +89,24 @@ const ProjectPage = () => {
       setError('SpendPilot could not reach Jira. Check the app installation and your project permissions.');
     } finally {
       setBusy(false);
+    }
+  };
+
+  const linkExistingIssue = async () => {
+    setLinking(true);
+    setResult(null);
+    setError('');
+    try {
+      const response = await invoke('syncJiraSpendRequest', { issueKey: existingIssueKey });
+      if (response.status !== 'linked' || !response.backend || response.backend.status === 'unavailable') {
+        setError(response.message || 'SpendPilot could not link that Jira issue.');
+      } else {
+        setResult(response);
+      }
+    } catch {
+      setError('SpendPilot could not read that Jira issue. Check the issue key and app permissions.');
+    } finally {
+      setLinking(false);
     }
   };
 
@@ -132,6 +156,14 @@ const ProjectPage = () => {
         ) : null}
       </Stack>
 
+      <SectionMessage appearance="information" title="Already have a Jira request?"><Stack space="space.100">
+        <Text>Link an existing issue such as KAN-4 to the backend timeline without creating a duplicate Jira issue.</Text>
+        <Textfield value={existingIssueKey} onChange={(event) => setExistingIssueKey(event.target.value)} />
+        <Button appearance="default" isDisabled={linking || !existingIssueKey.trim()} onClick={linkExistingIssue}>
+          {linking ? 'Linking Jira issue…' : 'Link existing issue to backend'}
+        </Button>
+      </Stack></SectionMessage>
+
       <Stack space="space.200">
         <Stack space="space.050">
           <Label labelFor="project-key">Jira project key</Label>
@@ -160,7 +192,14 @@ const ProjectPage = () => {
 
       {result ? (
         <SectionMessage appearance="confirmation" title="Jira issue created">
-          <Text>SpendPilot created {result.issueKey}. Approval and purchase are still separate.</Text>
+          <Stack space="space.050">
+            <Text>SpendPilot created {result.issueKey}.</Text>
+            {result.backend?.status === 'linked' || result.backend?.status === 'already_linked' ? (
+              <Text>Backend task: {result.backend.taskId}. The Jira issue and task timeline are linked. Approval and purchase are still separate.</Text>
+            ) : (
+              <Text>{result.backend?.message || 'Backend sync is not configured yet. No spend action was taken.'}</Text>
+            )}
+          </Stack>
         </SectionMessage>
       ) : null}
       {error ? (

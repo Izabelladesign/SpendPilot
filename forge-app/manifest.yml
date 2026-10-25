@@ -35,6 +35,7 @@ modules:
       actions:
         - parse-spend-request
         - create-jira-spend-request
+        - sync-jira-spend-request
   action:
     - key: parse-spend-request
       name: Parse a spend request
@@ -83,6 +84,19 @@ modules:
           type: string
           required: false
           description: Comma-separated purchasing constraints.
+    - key: sync-jira-spend-request
+      name: Link an existing Jira spend request
+      function: syncJiraSpendRequest
+      actionVerb: UPDATE
+      description: >-
+        Read an existing Jira spend-request issue and link it to the shared
+        backend task timeline. This does not edit, approve, or purchase anything.
+      inputs:
+        issueKey:
+          title: Jira issue key
+          type: string
+          required: true
+          description: An existing Jira issue key, for example KAN-4.
   jira:projectPage:
     - key: spendpilot-project-page
       resource: spendpilot-project-page
@@ -98,6 +112,8 @@ modules:
       handler: index.parseSpendRequest
     - key: createJiraSpendRequest
       handler: index.createJiraSpendRequest
+    - key: syncJiraSpendRequest
+      handler: index.syncJiraSpendRequest
     - key: projectPageResolver
       handler: index.resolver
 resources:
@@ -105,11 +121,18 @@ resources:
     path: src/frontend/project-page.jsx
 permissions:
   scopes:
+    - read:jira-work
     - write:jira-work
   external:
     fetch:
       backend:
-        - address: "https://api.openai.com"
+        # Keep OpenAI available by default. For a deployed backend, export
+        # SPENDPILOT_BACKEND_EGRESS to its HTTPS origin before `forge deploy`.
+        - address: "${SPENDPILOT_BACKEND_EGRESS}"
+environment:
+  variables:
+    - key: SPENDPILOT_BACKEND_EGRESS
+      default: "https://api.openai.com"
 app:
   runtime:
     name: nodejs24.x

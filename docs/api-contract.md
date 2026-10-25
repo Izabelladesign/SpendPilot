@@ -208,6 +208,28 @@ Returns chronological agent events:
 
 Response: `200 OK`.
 
+### `GET /tasks/{taskId}/execution`
+
+Returns the read-only execution summary used by the enterprise dashboard. It
+joins the persisted task, purchase-request, approval, payment, and event
+records. Payment state and task state remain separate; a `SETTLED` payment does
+not imply that the task is `COMPLETED`.
+
+Response:
+
+```json
+{
+  "taskId": "uuid",
+  "taskStatus": "VERIFYING",
+  "purchaseRequests": [],
+  "payments": [],
+  "approvals": [],
+  "events": []
+}
+```
+
+Response: `200 OK`.
+
 ### `POST /tasks/{taskId}/execute`
 
 Requests execution of a task. The backend must enforce idempotency and policy

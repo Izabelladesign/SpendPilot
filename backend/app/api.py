@@ -17,6 +17,7 @@ from app.models import (
     Approval,
     Budget,
     Payment,
+    PurchaseRequest,
     Task,
     TaskStatus,
     User,
@@ -32,8 +33,10 @@ from app.schemas import (
     ErrorResponse,
     EventListResponse,
     ExecuteTaskRequest,
+    ExecutionSummaryResponse,
     PaymentListResponse,
     PaymentResponse,
+    PurchaseRequestStatusResponse,
     TaskListResponse,
     TaskResponse,
 )
@@ -148,6 +151,23 @@ def _payment_response(payment: Payment) -> PaymentResponse:
         transactionReference=payment.transaction_reference,
         createdAt=payment.created_at,
         updatedAt=payment.updated_at,
+    )
+
+
+def _purchase_request_status_response(
+    purchase: PurchaseRequest,
+) -> PurchaseRequestStatusResponse:
+    return PurchaseRequestStatusResponse(
+        id=purchase.id,
+        taskId=purchase.task_id,
+        providerId=purchase.provider_id,
+        amount=purchase.amount,
+        currency=purchase.currency,
+        decision=purchase.decision,
+        decisionReason=purchase.decision_reason,
+        approvalId=purchase.approval.id if purchase.approval else None,
+        createdAt=purchase.created_at,
+        updatedAt=purchase.updated_at,
     )
 
 
@@ -283,6 +303,61 @@ def get_task_events(
 
     return EventListResponse(
         items=[_event_response(event) for event in task.events]
+    )
+
+
+@router.get(
+    "/tasks/{task_id}/execution",
+    response_model=ExecutionSummaryResponse,
+    summary="Read the task execution summary",
+)
+def get_task_execution_summary(
+    task_id: str,
+    request: Request,
+    db: Session = Depends(get_db),
+) -> ExecutionSummaryResponse:
+    """Join governance, payment, and event state for dashboard readers.
+
+    This endpoint is deliberately read-only. It reports payment state alongside
+    the task state without treating a settled payment as a successful task.
+    """
+
+    task = _find_task(task_id, db, request)
+    purchase_requests = (
+        db.query(PurchaseRequest)
+        .filter(PurchaseRequest.task_id == task.id)
+        .order_by(PurchaseRequest.created_at.asc())
+        .all()
+    )
+    payments = (
+        db.query(Payment)
+        .filter(Payment.task_id == task.id)
+        .order_by(Payment.created_at.asc())
+        .all()
+    )
+    approvals = (
+        db.query(Approval)
+        .filter(Approval.task_id == task.id)
+        .order_by(Approval.created_at.asc())
+        .all()
+    )
+    events = (
+        db.query(AgentEvent)
+        .filter(AgentEvent.task_id == task.id)
+        .order_by(AgentEvent.created_at.asc())
+        .all()
+    )
+
+    return ExecutionSummaryResponse(
+        taskId=task.id,
+        taskStatus=task.status,
+        purchaseRequests=[
+            _purchase_request_status_response(purchase)
+            for purchase in purchase_requests
+        ],
+        payments=[_payment_response(payment) for payment in payments],
+        approvals=[_approval_response(approval) for approval in approvals],
+        events=[_event_response(event) for event in events],
     )
 
 

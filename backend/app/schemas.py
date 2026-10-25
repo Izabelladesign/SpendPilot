@@ -116,6 +116,19 @@ class PaymentResponse(APIModel):
     updated_at: datetime = Field(alias="updatedAt")
 
 
+class PurchaseRequestStatusResponse(APIModel):
+    id: str
+    task_id: str = Field(alias="taskId")
+    provider_id: str = Field(alias="providerId")
+    amount: Decimal
+    currency: str
+    decision: str
+    decision_reason: str = Field(alias="decisionReason")
+    approval_id: str | None = Field(alias="approvalId")
+    created_at: datetime = Field(alias="createdAt")
+    updated_at: datetime = Field(alias="updatedAt")
+
+
 class PaymentListResponse(APIModel):
     items: list[PaymentResponse]
     next_cursor: str | None = Field(default=None, alias="nextCursor")
@@ -139,6 +152,15 @@ class ApprovalResponse(APIModel):
     decided_at: datetime | None = Field(alias="decidedAt")
     created_at: datetime = Field(alias="createdAt")
     updated_at: datetime = Field(alias="updatedAt")
+
+
+class ExecutionSummaryResponse(APIModel):
+    task_id: str = Field(alias="taskId")
+    task_status: str = Field(alias="taskStatus")
+    purchase_requests: list[PurchaseRequestStatusResponse] = Field(alias="purchaseRequests")
+    payments: list[PaymentResponse]
+    approvals: list[ApprovalResponse]
+    events: list[AgentEventResponse]
 
 
 class ErrorBody(APIModel):

@@ -13,11 +13,12 @@ import {
 } from "@/components/ui/card";
 import {
   getBudget,
-  getTaskEvents,
+  getTaskExecution,
   listPayments,
   listTasks,
   type AgentEvent,
   type Budget,
+  type ExecutionSummary,
   type Payment,
   type Task,
 } from "@/lib/spendpilot-api";
@@ -55,11 +56,31 @@ function statusLabel(status: string): string {
   return status.replaceAll("_", " ").toLowerCase().replace(/(^| )\S/g, (letter) => letter.toUpperCase());
 }
 
+function executionStatusVariant(status: string): "default" | "secondary" | "outline" | "destructive" {
+  if (["SETTLED", "APPROVED", "VERIFIED", "COMPLETED"].includes(status)) return "default";
+  if (["FAILED", "BLOCK", "REJECTED", "FAILED_VERIFICATION"].includes(status)) return "destructive";
+  if (["REVIEW_REQUIRED", "PENDING", "VERIFYING"].includes(status)) return "outline";
+  return "secondary";
+}
+
+function verificationStatus(events: AgentEvent[]): string {
+  const event = [...events].reverse().find((candidate) => {
+    const candidateStatus = candidate.metadata.verificationStatus;
+    return candidate.type === "OUTPUT_VERIFIED" || candidate.type === "VERIFICATION_FAILED" || typeof candidateStatus === "string";
+  });
+
+  if (!event) return "NOT_REPORTED";
+  if (event.type === "OUTPUT_VERIFIED") return "VERIFIED";
+  if (event.type === "VERIFICATION_FAILED") return "FAILED_VERIFICATION";
+  return String(event.metadata.verificationStatus).toUpperCase();
+}
+
 export function EnterpriseDashboard() {
   const [tasks, setTasks] = useState<Task[]>([]);
   const [budgets, setBudgets] = useState<Budget[]>([]);
   const [payments, setPayments] = useState<Payment[]>([]);
   const [events, setEvents] = useState<AgentEvent[]>([]);
+  const [execution, setExecution] = useState<ExecutionSummary | null>(null);
   const [selectedTaskId, setSelectedTaskId] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -78,11 +99,12 @@ export function EnterpriseDashboard() {
         ),
       );
       const nextTaskId = selectedTaskId ?? nextTasks[0]?.id ?? null;
-      const nextEvents = nextTaskId ? await getTaskEvents(nextTaskId) : { items: [] };
+      const nextExecution = nextTaskId ? await getTaskExecution(nextTaskId) : null;
       setTasks(nextTasks);
       setPayments(nextPayments);
       setBudgets(nextBudgets);
-      setEvents(nextEvents.items);
+      setExecution(nextExecution);
+      setEvents(nextExecution?.events ?? []);
       if (!selectedTaskId && nextTaskId) setSelectedTaskId(nextTaskId);
     } catch (requestError) {
       setError(requestError instanceof Error ? requestError.message : "Unable to load the dashboard.");
@@ -100,6 +122,10 @@ export function EnterpriseDashboard() {
   }, [selectedTaskId]);
 
   const selectedTask = tasks.find((task) => task.id === selectedTaskId) ?? null;
+  const selectedPayments = execution?.payments ?? [];
+  const selectedPurchase = execution?.purchaseRequests.at(-1) ?? null;
+  const selectedApproval = execution?.approvals.at(-1) ?? null;
+  const selectedVerification = verificationStatus(events);
   const totals = useMemo(
     () =>
       budgets.reduce(
@@ -219,6 +245,61 @@ export function EnterpriseDashboard() {
                 ))}
               </ol>
             )}
+          </CardContent>
+        </Card>
+      </section>
+
+      <section className="grid items-start gap-6 lg:grid-cols-3" aria-label="Selected execution state">
+        <Card>
+          <CardHeader>
+            <CardTitle>Governance</CardTitle>
+            <CardDescription>Decision recorded for the selected task.</CardDescription>
+          </CardHeader>
+          <CardContent>
+            <Badge variant={executionStatusVariant(selectedPurchase?.decision ?? "NOT_REQUESTED")}>
+              {statusLabel(selectedPurchase?.decision ?? "NOT_REQUESTED")}
+            </Badge>
+            <p className="mt-3 text-sm text-muted-foreground">
+              {selectedApproval?.status === "PENDING"
+                ? "Human approval is still required."
+                : selectedPurchase?.decisionReason ?? "No purchase request has been recorded."}
+            </p>
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader>
+            <CardTitle>Payment state</CardTitle>
+            <CardDescription>Payment is reported independently from task success.</CardDescription>
+          </CardHeader>
+          <CardContent className="flex flex-col gap-2">
+            {selectedPayments.length === 0 ? (
+              <p className="text-sm text-muted-foreground">No payment recorded.</p>
+            ) : selectedPayments.map((payment) => (
+              <div key={payment.id} className="flex items-center justify-between gap-3">
+                <span className="text-sm">{formatMoney(payment.amount, payment.currency)}</span>
+                <Badge variant={executionStatusVariant(payment.status)}>{statusLabel(payment.status)}</Badge>
+              </div>
+            ))}
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader>
+            <CardTitle>Task verification</CardTitle>
+            <CardDescription>Payment settlement never marks a task verified by itself.</CardDescription>
+          </CardHeader>
+          <CardContent className="flex flex-col gap-2">
+            <div className="flex items-center justify-between gap-3">
+              <span className="text-sm">Task status</span>
+              <Badge variant={executionStatusVariant(selectedTask?.status ?? "NOT_REPORTED")}>
+                {statusLabel(selectedTask?.status ?? "NOT_REPORTED")}
+              </Badge>
+            </div>
+            <div className="flex items-center justify-between gap-3">
+              <span className="text-sm">Verification</span>
+              <Badge variant={executionStatusVariant(selectedVerification)}>{statusLabel(selectedVerification)}</Badge>
+            </div>
           </CardContent>
         </Card>
       </section>

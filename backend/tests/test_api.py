@@ -13,7 +13,7 @@ from sqlalchemy.orm import Session, sessionmaker
 
 from app.database import get_db
 from app.main import app
-from app.models import Base, Task
+from app.models import Approval, Base, Payment, Provider, PurchaseRequest, Task
 
 
 @pytest.fixture()
@@ -144,3 +144,63 @@ def test_payments_are_read_only_and_empty_in_an_isolated_test(client: TestClient
 
     assert response.status_code == 200
     assert response.json() == {"items": [], "nextCursor": None}
+
+
+def test_execution_summary_keeps_payment_and_task_status_separate(client: TestClient) -> None:
+    created = create_task(client)
+
+    with app.state.test_session_factory() as db:
+        provider = Provider(name="Local research provider", is_approved=True)
+        db.add(provider)
+        db.flush()
+
+        purchase = PurchaseRequest(
+            task_id=created["id"],
+            provider_id=provider.id,
+            idempotency_key="execution-summary-001",
+            amount="0.50",
+            currency="USD",
+            decision="REVIEW_REQUIRED",
+            decision_reason="Human review is required for this test purchase.",
+        )
+        db.add(purchase)
+        db.flush()
+        db.add(
+            Approval(
+                task_id=created["id"],
+                purchase_request_id=purchase.id,
+                amount="0.50",
+                currency="USD",
+                vendor=provider.name,
+                status="PENDING",
+                reason=purchase.decision_reason,
+            )
+        )
+        db.add(
+            Payment(
+                task_id=created["id"],
+                purchase_request_id=purchase.id,
+                provider_id=provider.id,
+                amount="0.50",
+                currency="USD",
+                status="SETTLED",
+                transaction_reference="local-test-settlement",
+            )
+        )
+        db.commit()
+
+    response = client.get(f"/tasks/{created['id']}/execution")
+
+    assert response.status_code == 200
+    summary = response.json()
+    assert summary["taskStatus"] == "REQUESTED"
+    assert summary["purchaseRequests"][0]["decision"] == "REVIEW_REQUIRED"
+    assert summary["approvals"][0]["status"] == "PENDING"
+    assert summary["payments"][0]["status"] == "SETTLED"
+
+
+def test_execution_summary_unknown_task_returns_contract_error(client: TestClient) -> None:
+    response = client.get("/tasks/not-a-real-task/execution")
+
+    assert response.status_code == 404
+    assert response.json()["error"]["code"] == "not_found"

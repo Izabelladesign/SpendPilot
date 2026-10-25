@@ -66,6 +66,43 @@ export type Payment = {
   updatedAt: string;
 };
 
+export type PurchaseRequestStatus = {
+  id: string;
+  taskId: string;
+  providerId: string;
+  amount: string;
+  currency: string;
+  decision: string;
+  decisionReason: string;
+  approvalId: string | null;
+  createdAt: string;
+  updatedAt: string;
+};
+
+export type Approval = {
+  id: string;
+  taskId: string;
+  purchaseRequestId: string;
+  amount: string;
+  currency: string;
+  vendor: string;
+  status: string;
+  reason: string;
+  decidedBy: string | null;
+  decidedAt: string | null;
+  createdAt: string;
+  updatedAt: string;
+};
+
+export type ExecutionSummary = {
+  taskId: string;
+  taskStatus: string;
+  purchaseRequests: PurchaseRequestStatus[];
+  payments: Payment[];
+  approvals: Approval[];
+  events: AgentEvent[];
+};
+
 type ListResponse<T> = {
   items: T[];
   nextCursor?: string | null;
@@ -86,6 +123,10 @@ export function listTasks(): Promise<ListResponse<Task>> {
 
 export function getTaskEvents(taskId: string): Promise<ListResponse<AgentEvent>> {
   return request<ListResponse<AgentEvent>>(`/tasks/${taskId}/events`);
+}
+
+export function getTaskExecution(taskId: string): Promise<ExecutionSummary> {
+  return request<ExecutionSummary>(`/tasks/${taskId}/execution`);
 }
 
 export function getBudget(budgetId: string): Promise<Budget> {

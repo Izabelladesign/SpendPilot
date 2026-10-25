@@ -103,18 +103,60 @@ export type ExecutionSummary = {
   events: AgentEvent[];
 };
 
+export type CreateTaskInput = {
+  objective: string;
+  budget: Money;
+  quantity: number;
+  qualityTarget: string;
+  constraints: string[];
+};
+
+export type VerifyResearchBriefInput = {
+  summary: string;
+  copilotSection: string;
+  cursorSection: string;
+  pricingSection: string;
+  securitySection: string;
+  sourceUrls: string[];
+  unverifiedInformation: string;
+};
+
 type ListResponse<T> = {
   items: T[];
   nextCursor?: string | null;
 };
 
-async function request<T>(path: string): Promise<T> {
-  const response = await fetch(`${API_URL}${path}`, { cache: "no-store" });
+async function request<T>(path: string, options?: RequestInit): Promise<T> {
+  const response = await fetch(`${API_URL}${path}`, {
+    ...options,
+    cache: "no-store",
+    headers: {
+      "Content-Type": "application/json",
+      ...options?.headers,
+    },
+  });
   if (!response.ok) {
     const body = await response.json().catch(() => null);
     throw new Error(body?.error?.message || `API request failed (${response.status})`);
   }
   return response.json() as Promise<T>;
+}
+
+export function createTask(input: CreateTaskInput): Promise<Task> {
+  return request<Task>("/tasks", {
+    method: "POST",
+    body: JSON.stringify(input),
+  });
+}
+
+export function verifyTask(
+  taskId: string,
+  input: VerifyResearchBriefInput,
+): Promise<Task> {
+  return request<Task>(`/tasks/${taskId}/verify`, {
+    method: "POST",
+    body: JSON.stringify(input),
+  });
 }
 
 export function listTasks(): Promise<ListResponse<Task>> {

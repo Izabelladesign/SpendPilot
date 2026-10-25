@@ -1,0 +1,146 @@
+"use client";
+
+import { FormEvent, useState } from "react";
+import { AlertCircle, CheckCircle2, Play, Send } from "lucide-react";
+import { createTask, verifyTask, type Task } from "@/lib/spendpilot-api";
+import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import {
+  Card,
+  CardContent,
+  CardDescription,
+  CardHeader,
+  CardTitle,
+} from "@/components/ui/card";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { Textarea } from "@/components/ui/textarea";
+
+const demoBrief = {
+  summary: "A comparison for a 50-person engineering team.",
+  copilotSection: "GitHub Copilot pricing and security information.",
+  cursorSection: "Cursor pricing and security information.",
+  pricingSection: "Pricing is based on the cited public vendor pages.",
+  securitySection: "Security details require review against current vendor documentation.",
+  sourceUrls: [
+    "https://github.com/features/copilot",
+    "https://cursor.com/pricing",
+  ],
+  unverifiedInformation: "Enterprise discounts and organization-specific settings are not verified.",
+};
+
+type EnterpriseIntakeProps = {
+  onTaskUpdated: (task: Task) => void;
+};
+
+export function EnterpriseIntake({ onTaskUpdated }: EnterpriseIntakeProps) {
+  const [objective, setObjective] = useState(
+    "Compare GitHub Copilot and Cursor for a 50-person engineering team",
+  );
+  const [budget, setBudget] = useState("1.00");
+  const [task, setTask] = useState<Task | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  async function submitRequest(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setBusy(true);
+    setError(null);
+    try {
+      const created = await createTask({
+        objective: objective.trim(),
+        budget: { amount: budget, currency: "USD" },
+        quantity: 1,
+        qualityTarget: "Include pricing, security, two HTTPS sources, and unverified information",
+        constraints: ["Research task only", "Maximum USD 1.00"],
+      });
+      setTask(created);
+      onTaskUpdated(created);
+    } catch (requestError) {
+      setError(requestError instanceof Error ? requestError.message : "Unable to submit the request.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function runLocalDemoResult() {
+    if (!task) return;
+    setBusy(true);
+    setError(null);
+    try {
+      const verified = await verifyTask(task.id, demoBrief);
+      setTask(verified);
+      onTaskUpdated(verified);
+    } catch (requestError) {
+      setError(requestError instanceof Error ? requestError.message : "Unable to verify the local demo result.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle>Start a company research request</CardTitle>
+        <CardDescription>
+          Describe the outcome your team needs. SpendPilot keeps the requirements and budget together before any provider action.
+        </CardDescription>
+      </CardHeader>
+      <CardContent className="flex flex-col gap-5">
+        <form className="flex flex-col gap-4" onSubmit={submitRequest}>
+          <div className="flex flex-col gap-2">
+            <Label htmlFor="enterprise-objective">What should SpendPilot research?</Label>
+            <Textarea
+              id="enterprise-objective"
+              value={objective}
+              onChange={(event) => setObjective(event.target.value)}
+              required
+              minLength={1}
+              rows={3}
+            />
+          </div>
+          <div className="flex max-w-xs flex-col gap-2">
+            <Label htmlFor="enterprise-budget">Maximum research budget (USD)</Label>
+            <Input
+              id="enterprise-budget"
+              type="number"
+              min="0.01"
+              step="0.01"
+              value={budget}
+              onChange={(event) => setBudget(event.target.value)}
+              required
+            />
+          </div>
+          <Button type="submit" disabled={busy} className="w-fit">
+            <Send />
+            {busy ? "Submitting…" : "Create research request"}
+          </Button>
+        </form>
+
+        {task ? (
+          <div className="flex flex-col gap-3 rounded-lg border bg-muted/30 p-4">
+            <div className="flex flex-wrap items-center justify-between gap-3">
+              <div>
+                <p className="text-sm font-medium">Request submitted</p>
+                <p className="text-xs text-muted-foreground">SpendPilot is ready for the research result.</p>
+              </div>
+              <Badge variant={task.status === "COMPLETED" ? "default" : "outline"}>
+                {task.status === "COMPLETED" ? <CheckCircle2 /> : <AlertCircle />}
+                {task.status.replaceAll("_", " ")}
+              </Badge>
+            </div>
+            <Button type="button" variant="outline" onClick={() => void runLocalDemoResult()} disabled={busy || task.status === "COMPLETED"} className="w-fit">
+              <Play />
+              Run local demo result
+            </Button>
+            <p className="text-xs text-muted-foreground">
+              Demo mode uses a local research response fixture. It does not call a provider or execute payment.
+            </p>
+          </div>
+        ) : null}
+
+        {error ? <p className="text-sm text-destructive" role="alert">{error}</p> : null}
+      </CardContent>
+    </Card>
+  );
+}

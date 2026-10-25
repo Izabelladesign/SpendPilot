@@ -4,6 +4,7 @@ import { useEffect, useMemo, useState } from "react";
 import { Activity, AlertCircle, ArrowUpRight, CheckCircle2, Clock3, RefreshCw, ShieldCheck, Wallet } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { EnterpriseIntake } from "@/components/enterprise-intake";
 import {
   Card,
   CardContent,
@@ -144,6 +145,11 @@ export function EnterpriseDashboard() {
   const completed = tasks.filter((task) => task.status === "COMPLETED").length;
   const active = tasks.filter((task) => !["COMPLETED", "FAILED"].includes(task.status)).length;
 
+  function handleTaskUpdated(task: Task) {
+    setSelectedTaskId(task.id);
+    void refresh();
+  }
+
   return (
     <main className="mx-auto flex w-full max-w-6xl flex-1 flex-col gap-8 px-4 py-10 sm:px-6">
       <div className="flex flex-col justify-between gap-5 sm:flex-row sm:items-end">
@@ -159,6 +165,8 @@ export function EnterpriseDashboard() {
           Refresh
         </Button>
       </div>
+
+      <EnterpriseIntake onTaskUpdated={handleTaskUpdated} />
 
       {error ? (
         <div className="flex items-start gap-3 rounded-xl border border-destructive/30 bg-destructive/10 p-4 text-sm" role="alert">

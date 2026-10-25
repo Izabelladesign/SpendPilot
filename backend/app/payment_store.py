@@ -13,6 +13,7 @@ DB_PATH = Path(
 )
 
 VALID_STATUSES = {
+    "READY",
     "IN_PROGRESS",
     "PAID",
     "FAILED",
@@ -29,12 +30,14 @@ FINAL_STATUSES = {
 
 ALLOWED_TRANSITIONS = {
     "IN_PROGRESS": {
+        "READY",
         "PAID",
         "FAILED",
         "DENIED",
         "REVIEW_REQUIRED",
         "PENDING_RECONCILIATION",
     },
+    "READY": {"PENDING_RECONCILIATION"},
     "REVIEW_REQUIRED": {
         "DENIED",
         "IN_PROGRESS",
@@ -194,6 +197,49 @@ def update_payment(key, status, message):
             SET status = ?, message = ?
             WHERE idempotency_key = ?
         """, (status, message, key))
+
+
+
+def claim_payment_execution(key):
+    """Atomically claim one authorized, reserved payment."""
+    with connect() as conn:
+        conn.execute("BEGIN IMMEDIATE")
+
+        row = conn.execute("""
+            SELECT fingerprint FROM payments
+            WHERE idempotency_key = ? AND status = 'READY'
+        """, (key,)).fetchone()
+
+        if row is None:
+            return False
+
+        fingerprint = json.loads(row[0])
+        reservation = conn.execute("""
+            SELECT status, task_id, amount_cents
+            FROM budget_reservations
+            WHERE payment_key = ?
+        """, (key,)).fetchone()
+
+        from decimal import Decimal
+        amount = Decimal(fingerprint["amount_usd"]) * 100
+
+        if (
+            reservation is None
+            or reservation[0] != "RESERVED"
+            or reservation[1] != fingerprint["task_id"]
+            or amount != amount.to_integral_value()
+            or reservation[2] != int(amount)
+        ):
+            raise ValueError("Valid budget reservation required")
+
+        cursor = conn.execute("""
+            UPDATE payments
+            SET status = 'PENDING_RECONCILIATION',
+                message = 'Execution claimed; settlement pending'
+            WHERE idempotency_key = ? AND status = 'READY'
+        """, (key,))
+
+        return cursor.rowcount == 1
 
 
 def list_payments(limit=50):
@@ -391,7 +437,6 @@ def finalize_settlement_atomic(
             raise ValueError("Payment already finalized")
 
         if status not in {
-            "IN_PROGRESS",
             "PENDING_RECONCILIATION",
         }:
             raise ValueError(

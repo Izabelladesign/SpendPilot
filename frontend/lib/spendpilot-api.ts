@@ -103,6 +103,52 @@ export type ExecutionSummary = {
   events: AgentEvent[];
 };
 
+export type LocalDemoCandidate = {
+  name: string;
+  rank: number;
+  selected: boolean;
+  comparison: string;
+  evidence: string[];
+};
+
+export type LocalDemoRun = {
+  mode: string;
+  scenario: string;
+  candidates: LocalDemoCandidate[];
+  recommendation: {
+    selectedProduct: string;
+    alternativeProduct: string;
+    rationale: string;
+    estimatedResearchCost: string;
+    evidenceStatus: string;
+  };
+  governance: {
+    status: string;
+    budgetCap: string;
+    approvalRequired: boolean;
+    paymentAuthorized: boolean;
+    reason: string;
+  };
+  purchase: {
+    state: string;
+    executed: boolean;
+    fundsMoved: boolean;
+    providerCalled: boolean;
+    nextStep: string;
+  };
+  licenseHealth: {
+    mode: string;
+    vendorAccountsAccessed: boolean;
+    items: Array<{
+      id: string;
+      product: string;
+      seats: string;
+      detail: string;
+      action: string;
+    }>;
+  };
+};
+
 export type CreateTaskInput = {
   objective: string;
   budget: Money;
@@ -156,6 +202,12 @@ export function verifyTask(
   return request<Task>(`/tasks/${taskId}/verify`, {
     method: "POST",
     body: JSON.stringify(input),
+  });
+}
+
+export function runLocalDemo(taskId: string): Promise<Task> {
+  return request<Task>(`/tasks/${taskId}/demo-run`, {
+    method: "POST",
   });
 }
 

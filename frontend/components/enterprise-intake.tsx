@@ -2,7 +2,7 @@
 
 import { FormEvent, useState } from "react";
 import { AlertCircle, CheckCircle2, Play, Send } from "lucide-react";
-import { createTask, verifyTask, type Task } from "@/lib/spendpilot-api";
+import { createTask, runLocalDemo, type Task } from "@/lib/spendpilot-api";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
@@ -15,19 +15,6 @@ import {
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
-
-const demoBrief = {
-  summary: "Recommendation: GitHub Copilot is the preferred option for a 50-person engineering team; Cursor remains the comparison alternative.",
-  copilotSection: "GitHub Copilot is the selected product in this local demo because it is treated as the stronger fit for a team-wide managed rollout.",
-  cursorSection: "Cursor is the researched alternative and remains visible for reviewer comparison.",
-  pricingSection: "The local demo compares pricing evidence structurally; it does not claim a live quote or charge a provider.",
-  securitySection: "Security details require review against current vendor documentation before a production purchase.",
-  sourceUrls: [
-    "https://github.com/features/copilot",
-    "https://cursor.com/pricing",
-  ],
-  unverifiedInformation: "Enterprise discounts and organization-specific settings are not verified.",
-};
 
 type EnterpriseIntakeProps = {
   onTaskUpdated: (task: Task) => void;
@@ -68,9 +55,9 @@ export function EnterpriseIntake({ onTaskUpdated }: EnterpriseIntakeProps) {
     setBusy(true);
     setError(null);
     try {
-      const verified = await verifyTask(task.id, demoBrief);
-      setTask(verified);
-      onTaskUpdated(verified);
+      const completed = await runLocalDemo(task.id);
+      setTask(completed);
+      onTaskUpdated(completed);
     } catch (requestError) {
       setError(requestError instanceof Error ? requestError.message : "Unable to verify the local demo result.");
     } finally {

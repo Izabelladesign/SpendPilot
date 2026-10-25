@@ -270,3 +270,48 @@ def test_terminal_task_cannot_be_verified_again(client: TestClient) -> None:
 
     assert second.status_code == 409
     assert second.json()["error"]["code"] == "invalid_state_transition"
+
+
+def test_local_demo_run_records_recommendation_governance_and_license_health(
+    client: TestClient,
+) -> None:
+    payload = task_payload()
+    payload["objective"] = "Compare GitHub Copilot and Cursor for a 50-person engineering team"
+    created = client.post("/tasks", json=payload).json()
+
+    response = client.post(f"/tasks/{created['id']}/demo-run")
+
+    assert response.status_code == 200, response.text
+    body = response.json()
+    assert body["status"] == "COMPLETED"
+    assert body["output"]["demoRun"]["recommendation"]["selectedProduct"] == "GitHub Copilot"
+    assert body["output"]["demoRun"]["recommendation"]["alternativeProduct"] == "Cursor"
+    assert body["output"]["demoRun"]["governance"]["paymentAuthorized"] is False
+    assert body["output"]["demoRun"]["purchase"]["fundsMoved"] is False
+    assert len(body["output"]["demoRun"]["licenseHealth"]["items"]) == 3
+    assert body["output"]["verification"]["status"] == "VERIFIED"
+
+    events = client.get(f"/tasks/{created['id']}/events").json()["items"]
+    assert [event["type"] for event in events] == [
+        "TASK_CREATED",
+        "DEMO_RUN_STARTED",
+        "RESEARCH_COMPLETED",
+        "RECOMMENDATION_CREATED",
+        "POLICY_DECISION",
+        "PURCHASE_PREVIEWED",
+        "OUTPUT_RECEIVED",
+        "OUTPUT_VERIFIED",
+    ]
+
+    duplicate = client.post(f"/tasks/{created['id']}/demo-run")
+    assert duplicate.status_code == 200
+    assert len(client.get(f"/tasks/{created['id']}/events").json()["items"]) == 8
+
+
+def test_local_demo_run_rejects_an_unmatched_scenario(client: TestClient) -> None:
+    created = create_task(client)
+
+    response = client.post(f"/tasks/{created['id']}/demo-run")
+
+    assert response.status_code == 409
+    assert response.json()["error"]["code"] == "unsupported_demo_scenario"

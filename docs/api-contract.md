@@ -271,6 +271,19 @@ Request:
 Response: `200 OK` with the updated `Task` resource and verification result in
 `output.verification`.
 
+### `POST /tasks/{taskId}/demo-run`
+
+Runs the locked Copilot-versus-Cursor enterprise scenario entirely locally.
+The response is the updated `Task` resource. Its `output.demoRun` contains the
+candidate comparison, selected product, rationale, governance state, purchase
+preview, and sample license-health findings. The route also records the agent
+timeline and verifies the included research brief.
+
+This route is idempotent after the first demo run and never calls a provider,
+accesses a vendor account, signs a wallet transaction, or moves money. It
+returns `409 unsupported_demo_scenario` when the task objective is not the
+locked Copilot-versus-Cursor scenario.
+
 ### `GET /budgets/{budgetId}`
 
 Returns the calculated budget balances. Response: `200 OK`.

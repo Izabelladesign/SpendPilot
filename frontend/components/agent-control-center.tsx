@@ -24,7 +24,7 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
-import type { AgentEvent, Payment, Task } from "@/lib/spendpilot-api";
+import type { AgentEvent, LocalDemoRun, Payment, Task } from "@/lib/spendpilot-api";
 
 type AgentControlCenterProps = {
   task: Task | null;
@@ -33,7 +33,7 @@ type AgentControlCenterProps = {
   payments: Payment[];
 };
 
-const licenseInventory = [
+const sampleLicenseInventory = [
   {
     id: "figma",
     product: "Figma Professional",
@@ -65,11 +65,6 @@ const workflowStages = [
   { label: "Execute", detail: "Buy only when allowed", icon: ShoppingCart },
 ] as const;
 
-function isResearchDemo(task: Task | null): boolean {
-  const objective = task?.objective.toLowerCase() ?? "";
-  return objective.includes("copilot") && objective.includes("cursor");
-}
-
 export function AgentControlCenter({
   task,
   events,
@@ -78,7 +73,11 @@ export function AgentControlCenter({
 }: AgentControlCenterProps) {
   const [reviewedLicenses, setReviewedLicenses] = useState<string[]>([]);
   const [purchasePreviewed, setPurchasePreviewed] = useState(false);
-  const demoScenario = isResearchDemo(task);
+  const demoRun = task?.output?.demoRun as LocalDemoRun | undefined;
+  const demoScenario = Boolean(demoRun);
+  const selectedProduct = demoRun?.recommendation.selectedProduct ?? "NOT READY";
+  const alternativeProduct = demoRun?.recommendation.alternativeProduct ?? "—";
+  const licenseInventory = demoRun?.licenseHealth.items ?? sampleLicenseInventory;
   const completed = task?.status === "COMPLETED" && verificationStatus === "VERIFIED";
   const failed = task?.status === "FAILED" || verificationStatus === "FAILED_VERIFICATION";
   const researchStarted = Boolean(task);
@@ -178,29 +177,29 @@ export function AgentControlCenter({
               <>
                 <div className="flex flex-col gap-1">
                   <p className="text-xs font-medium uppercase tracking-[0.16em] text-muted-foreground">Preferred product</p>
-                  <p className="text-3xl font-semibold tracking-tight">GitHub Copilot</p>
-                  <p className="text-sm text-muted-foreground">Chosen from 2 researched options for the 50-person engineering team scenario.</p>
+                  <p className="text-3xl font-semibold tracking-tight">{selectedProduct}</p>
+                  <p className="text-sm text-muted-foreground">Chosen from {demoRun?.candidates.length ?? 0} researched options for the 50-person engineering team scenario.</p>
                 </div>
 
                 <div className="grid gap-3 sm:grid-cols-3">
                   <div className="rounded-lg border bg-background p-3">
                     <p className="text-xs text-muted-foreground">Alternative reviewed</p>
-                    <p className="mt-1 font-medium">Cursor</p>
+                    <p className="mt-1 font-medium">{alternativeProduct}</p>
                   </div>
                   <div className="rounded-lg border bg-background p-3">
                     <p className="text-xs text-muted-foreground">Budget cap</p>
-                    <p className="mt-1 font-medium">$1.00 demo cap</p>
+                    <p className="mt-1 font-medium">{demoRun?.governance.budgetCap}</p>
                   </div>
                   <div className="rounded-lg border bg-background p-3">
                     <p className="text-xs text-muted-foreground">Research cost</p>
-                    <p className="mt-1 font-medium">$0.00 local</p>
+                    <p className="mt-1 font-medium">{demoRun?.recommendation.estimatedResearchCost}</p>
                   </div>
                 </div>
 
                 <div className="rounded-lg border bg-background p-4">
-                  <p className="flex items-center gap-2 text-sm font-medium"><Sparkles className="size-4 text-primary" /> Why Copilot won this demo</p>
+                  <p className="flex items-center gap-2 text-sm font-medium"><Sparkles className="size-4 text-primary" /> Why {selectedProduct} won this demo</p>
                   <p className="mt-2 text-sm text-muted-foreground">
-                    The local decision fixture ranks Copilot first for a team-wide managed rollout. Cursor remains visible as the alternative so a reviewer can compare the tradeoff instead of receiving a black-box answer.
+                    {demoRun?.recommendation.rationale}
                   </p>
                 </div>
 
@@ -231,11 +230,11 @@ export function AgentControlCenter({
           <CardContent className="flex flex-col gap-4">
             <div className="flex items-center justify-between gap-3">
               <span className="text-sm text-muted-foreground">Recommendation</span>
-              <Badge variant={demoScenario ? "default" : "secondary"}>{demoScenario ? "COPILOT" : "NOT READY"}</Badge>
+              <Badge variant={demoScenario ? "default" : "secondary"}>{selectedProduct}</Badge>
             </div>
             <div className="flex items-center justify-between gap-3">
               <span className="text-sm text-muted-foreground">Policy gate</span>
-              <Badge variant={completed ? "default" : "outline"}>{completed ? "PASSED" : "REVIEW"}</Badge>
+              <Badge variant={completed ? "default" : "outline"}>{demoRun?.governance.status ?? "REVIEW"}</Badge>
             </div>
             <div className="flex items-center justify-between gap-3">
               <span className="text-sm text-muted-foreground">Payment</span>
@@ -272,7 +271,7 @@ export function AgentControlCenter({
         <CardContent className="flex flex-col gap-4">
           <div className="grid gap-3 sm:grid-cols-3">
             <div className="rounded-lg border p-3"><p className="text-xs text-muted-foreground">Seats monitored</p><p className="mt-1 text-xl font-semibold">37</p></div>
-            <div className="rounded-lg border p-3"><p className="text-xs text-muted-foreground">At-risk access</p><p className="mt-1 text-xl font-semibold">5</p></div>
+            <div className="rounded-lg border p-3"><p className="text-xs text-muted-foreground">At-risk access</p><p className="mt-1 text-xl font-semibold">{licenseInventory.length + 2}</p></div>
             <div className="rounded-lg border p-3"><p className="text-xs text-muted-foreground">Renewal action</p><p className="mt-1 text-xl font-semibold">Review</p></div>
           </div>
           <div className="divide-y rounded-lg border">

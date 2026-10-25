@@ -41,6 +41,11 @@ from app.schemas import (
     TaskListResponse,
     TaskResponse,
 )
+from app.services.local_demo import (
+    build_local_demo,
+    is_local_demo_task,
+    verify_local_demo,
+)
 from app.services.research_brief_verifier import verify_research_brief
 
 router = APIRouter()
@@ -501,6 +506,165 @@ def verify_task_output(
     db.commit()
     db.refresh(task)
 
+    return _task_response(task)
+
+
+@router.post(
+    "/tasks/{task_id}/demo-run",
+    response_model=TaskResponse,
+    summary="Run the safe local enterprise demo",
+    description=(
+        "Runs the deterministic Copilot-versus-Cursor enterprise demo. It records "
+        "research candidates, a recommendation, governance state, a purchase "
+        "preview, license findings, and verification without calling a provider "
+        "or moving money."
+    ),
+)
+def run_local_demo(
+    task_id: str,
+    request: Request,
+    db: Session = Depends(get_db),
+) -> TaskResponse:
+    """Persist one idempotent, no-money end-to-end demo run."""
+
+    task = _find_task(task_id, db, request)
+    existing_run = next(
+        (
+            event
+            for event in task.events
+            if event.event_type == "DEMO_RUN_STARTED"
+        ),
+        None,
+    )
+    if existing_run:
+        return _task_response(task)
+
+    if task.status in {TaskStatus.COMPLETED.value, TaskStatus.FAILED.value}:
+        raise _error(
+            "invalid_state_transition",
+            "A terminal task cannot start a local demo run.",
+            request,
+            409,
+        )
+
+    if not is_local_demo_task(task):
+        raise _error(
+            "unsupported_demo_scenario",
+            (
+                "The safe local demo is configured for the default GitHub Copilot "
+                "versus Cursor scenario."
+            ),
+            request,
+            409,
+        )
+
+    output, brief = build_local_demo(task)
+    demo_run = output["demoRun"]
+    governance = demo_run["governance"]
+    recommendation = demo_run["recommendation"]
+
+    task.status = TaskStatus.RESEARCHING.value
+    db.add(
+        AgentEvent(
+            task_id=task.id,
+            event_type="DEMO_RUN_STARTED",
+            message="Local agent run started; no external services are enabled",
+            metadata_json={"mode": "LOCAL_SIMULATION"},
+        )
+    )
+    db.add(
+        AgentEvent(
+            task_id=task.id,
+            event_type="RESEARCH_COMPLETED",
+            message="Compared GitHub Copilot and Cursor",
+            metadata_json={
+                "candidateCount": len(demo_run["candidates"]),
+                "candidates": [candidate["name"] for candidate in demo_run["candidates"]],
+                "evidenceStatus": recommendation["evidenceStatus"],
+            },
+        )
+    )
+    db.add(
+        AgentEvent(
+            task_id=task.id,
+            event_type="RECOMMENDATION_CREATED",
+            message="Recommended GitHub Copilot over Cursor",
+            metadata_json={
+                "selectedProduct": recommendation["selectedProduct"],
+                "alternativeProduct": recommendation["alternativeProduct"],
+                "rationale": recommendation["rationale"],
+            },
+        )
+    )
+    db.add(
+        AgentEvent(
+            task_id=task.id,
+            event_type="POLICY_DECISION",
+            message="Recommendation is gated for human approval",
+            metadata_json={
+                "decision": governance["status"],
+                "budgetCap": governance["budgetCap"],
+                "paymentAuthorized": governance["paymentAuthorized"],
+            },
+        )
+    )
+    db.add(
+        AgentEvent(
+            task_id=task.id,
+            event_type="PURCHASE_PREVIEWED",
+            message="Prepared a governed purchase preview; no funds moved",
+            metadata_json={
+                "executed": False,
+                "fundsMoved": False,
+                "providerCalled": False,
+            },
+        )
+    )
+
+    task.status = TaskStatus.VERIFYING.value
+    task.output = output
+    db.add(
+        AgentEvent(
+            task_id=task.id,
+            event_type="OUTPUT_RECEIVED",
+            message="Local research result received; verification started",
+            metadata_json={"sourceCount": len(brief["sourceUrls"])},
+        )
+    )
+    verification = verify_local_demo(brief)
+    task.output["verification"] = verification
+
+    if verification["status"] == "VERIFIED":
+        task.status = TaskStatus.COMPLETED.value
+        task.failure_reason = None
+        db.add(
+            AgentEvent(
+                task_id=task.id,
+                event_type="OUTPUT_VERIFIED",
+                message="Local agent run verified; task completed",
+                metadata_json={
+                    "verificationStatus": verification["status"],
+                    "checks": verification["checks"],
+                },
+            )
+        )
+    else:
+        task.status = TaskStatus.FAILED.value
+        task.failure_reason = verification["message"]
+        db.add(
+            AgentEvent(
+                task_id=task.id,
+                event_type="VERIFICATION_FAILED",
+                message="Local agent run failed verification",
+                metadata_json={
+                    "verificationStatus": verification["status"],
+                    "checks": verification["checks"],
+                },
+            )
+        )
+
+    db.commit()
+    db.refresh(task)
     return _task_response(task)
 
 

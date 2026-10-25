@@ -29,8 +29,8 @@ cd frontend
 npm run dev
 ```
 
-Open `http://localhost:3000/enterprise` and create a task from
-`http://localhost:8000/docs` with:
+Open `http://localhost:3000/enterprise` and use the intake form. The default
+scenario is already configured for:
 
 ```json
 {
@@ -42,7 +42,14 @@ Open `http://localhost:3000/enterprise` and create a task from
 }
 ```
 
-Copy the returned task `id`. Submit a local service response to
+Click **Start agent run**, then **Run safe local agent simulation**. The
+frontend calls `POST /tasks/{taskId}/demo-run`. This single local run records
+the researched candidates, explicitly recommends GitHub Copilot over Cursor,
+records the governance gate, creates a purchase preview, records sample
+license-health findings, and verifies the result. It does not call a provider,
+access a vendor account, or move funds.
+
+For lower-level verifier testing, submit a local service response to
 `POST /tasks/{taskId}/verify`:
 
 ```json
@@ -84,6 +91,8 @@ This is preliminary governance only and does not authorize or execute payment.
 ### Real in this repository
 
 - Server-owned research-brief structural verification.
+- Deterministic local end-to-end agent run with recommendation, governance,
+  purchase-preview, and license-health output.
 - Local task, event, purchase-request, approval, payment, and budget records.
 - Governance decision boundaries and idempotency checks.
 - Read-only execution summary for the enterprise dashboard.

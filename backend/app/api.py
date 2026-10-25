@@ -60,8 +60,12 @@ def _task_response(task: Task) -> TaskResponse:
     return TaskResponse(
         id=task.id,
         userId=task.user_id,
+        budgetId=task.budget_id,
         objective=task.objective,
-        budget={"amount": budget.total if budget else Decimal("0"), "currency": budget.currency if budget else "USD"},
+        budget={
+            "amount": budget.total if budget else Decimal("0"),
+            "currency": budget.currency if budget else "USD",
+        },
         quantity=task.quantity,
         qualityTarget=task.quality_target,
         constraints=task.constraints,
@@ -78,9 +82,9 @@ def _event_response(event: AgentEvent) -> AgentEventResponse:
     return AgentEventResponse(
         id=event.id,
         taskId=event.task_id,
-        eventType=event.event_type,
+        type=event.event_type,
         message=event.message,
-        metadataJson=event.metadata_json,
+        metadata=event.metadata_json,
         createdAt=event.created_at,
     )
 
@@ -142,7 +146,11 @@ def _approval_response(approval: Approval) -> ApprovalResponse:
         "userId and budgetId for the local demo user and task budget."
     ),
 )
-def create_task(payload: CreateTaskRequest, request: Request, db: Session = Depends(get_db)) -> TaskResponse:
+def create_task(
+    payload: CreateTaskRequest,
+    request: Request,
+    db: Session = Depends(get_db),
+) -> TaskResponse:
     user = db.get(User, payload.user_id) if payload.user_id else _demo_user(db)
     if user is None:
         raise _error("not_found", "User was not found.", request, 404)
@@ -174,7 +182,14 @@ def create_task(payload: CreateTaskRequest, request: Request, db: Session = Depe
     )
     db.add(task)
     db.flush()
-    db.add(AgentEvent(task_id=task.id, event_type="TASK_CREATED", message="Task received", metadata_json={}))
+    db.add(
+        AgentEvent(
+            task_id=task.id,
+            event_type="TASK_CREATED",
+            message="Task received",
+            metadata_json={},
+        )
+    )
     db.commit()
     db.refresh(task)
     return _task_response(task)
@@ -186,25 +201,53 @@ def get_task(task_id: str, request: Request, db: Session = Depends(get_db)) -> T
 
 
 @router.get("/tasks/{task_id}/events", response_model=EventListResponse)
-def get_task_events(task_id: str, request: Request, db: Session = Depends(get_db)) -> EventListResponse:
+def get_task_events(
+    task_id: str,
+    request: Request,
+    db: Session = Depends(get_db),
+) -> EventListResponse:
     task = _find_task(task_id, db, request)
     return EventListResponse(items=[_event_response(event) for event in task.events])
 
 
-@router.post("/tasks/{task_id}/execute", response_model=TaskResponse, status_code=status.HTTP_202_ACCEPTED)
-def execute_task(task_id: str, payload: ExecuteTaskRequest, request: Request, db: Session = Depends(get_db)) -> TaskResponse:
+@router.post(
+    "/tasks/{task_id}/execute",
+    response_model=TaskResponse,
+    status_code=status.HTTP_202_ACCEPTED,
+)
+def execute_task(
+    task_id: str,
+    payload: ExecuteTaskRequest,
+    request: Request,
+    db: Session = Depends(get_db),
+) -> TaskResponse:
     task = _find_task(task_id, db, request)
     duplicate = (
         db.query(AgentEvent)
         .filter(AgentEvent.task_id == task.id, AgentEvent.event_type == "EXECUTION_REQUESTED")
         .all()
     )
-    if any(event.metadata_json.get("idempotencyKey") == payload.idempotency_key for event in duplicate):
+    if any(
+        event.metadata_json.get("idempotencyKey") == payload.idempotency_key
+        for event in duplicate
+    ):
         return _task_response(task)
     if task.status in {TaskStatus.COMPLETED.value, TaskStatus.FAILED.value}:
-        raise _error("invalid_state_transition", "A terminal task cannot be executed again.", request, 409)
+        raise _error(
+            "invalid_state_transition",
+            "A terminal task cannot be executed again.",
+            request,
+            409,
+        )
     task.status = TaskStatus.RESEARCHING.value
-    db.add(AgentEvent(task_id=task.id, event_type="EXECUTION_REQUESTED", message="Execution handed to the agent workflow", metadata_json={"idempotencyKey": payload.idempotency_key}))
+    db.add(
+        AgentEvent(
+            task_id=task.id,
+            event_type="EXECUTION_REQUESTED",
+            message="Execution handed to the agent workflow",
+            metadata_json={"idempotencyKey": payload.idempotency_key},
+        )
+    )
     db.commit()
     db.refresh(task)
     return _task_response(task)
@@ -236,7 +279,12 @@ def get_payments(
 
 
 @router.post("/approvals/{approval_id}/decision", response_model=ApprovalResponse)
-def decide_approval(approval_id: str, payload: ApprovalDecisionRequest, request: Request, db: Session = Depends(get_db)) -> ApprovalResponse:
+def decide_approval(
+    approval_id: str,
+    payload: ApprovalDecisionRequest,
+    request: Request,
+    db: Session = Depends(get_db),
+) -> ApprovalResponse:
     approval = db.get(Approval, approval_id)
     if approval is None:
         raise _error("not_found", "Approval was not found.", request, 404)
@@ -244,7 +292,17 @@ def decide_approval(approval_id: str, payload: ApprovalDecisionRequest, request:
         raise _error("duplicate_request", "This approval has already been decided.", request, 409)
     approval.status = payload.decision
     approval.decided_at = datetime.now(timezone.utc)
-    db.add(AgentEvent(task_id=approval.task_id, event_type="APPROVAL_DECIDED", message=f"Approval {payload.decision.lower()}", metadata_json={"approvalId": approval.id, "comment": payload.comment}))
+    db.add(
+        AgentEvent(
+            task_id=approval.task_id,
+            event_type="APPROVAL_DECIDED",
+            message=f"Approval {payload.decision.lower()}",
+            metadata_json={
+                "approvalId": approval.id,
+                "comment": payload.comment,
+            },
+        )
+    )
     db.commit()
     db.refresh(approval)
     return _approval_response(approval)

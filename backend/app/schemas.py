@@ -52,6 +52,7 @@ class CreateTaskRequest(APIModel):
 class TaskResponse(APIModel):
     id: str
     user_id: str = Field(alias="userId")
+    budget_id: str | None = Field(alias="budgetId")
     objective: str
     budget: Money
     quantity: Decimal | None
@@ -68,9 +69,12 @@ class TaskResponse(APIModel):
 class AgentEventResponse(APIModel):
     id: str
     task_id: str = Field(alias="taskId")
-    type: str = Field(alias="eventType")
+    type: str = Field(validation_alias="event_type", serialization_alias="type")
     message: str
-    metadata: dict[str, Any] = Field(alias="metadataJson")
+    metadata: dict[str, Any] = Field(
+        validation_alias="metadata_json",
+        serialization_alias="metadata",
+    )
     created_at: datetime = Field(alias="createdAt")
 
 

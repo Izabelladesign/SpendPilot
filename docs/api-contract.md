@@ -69,6 +69,7 @@ EXPIRED
 {
   "id": "uuid",
   "userId": "uuid",
+  "budgetId": "uuid",
   "objective": "Process 1000 documents",
   "budget": { "amount": "50.00", "currency": "USD" },
   "quantity": 1000,

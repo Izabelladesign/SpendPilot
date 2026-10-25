@@ -36,7 +36,7 @@ FACILITATOR_URL = os.getenv("FACILITATOR_URL", "https://x402.org/facilitator")
 # is enabled only when a recipient is explicitly configured. No wallet or
 # payment credential is created by this module.
 if PAY_TO:
-    from x402.http import HTTPFacilitatorClient, FacilitatorConfig, PaymentOption
+    from x402.http import FacilitatorConfig, HTTPFacilitatorClient, PaymentOption
     from x402.http.middleware.fastapi import PaymentMiddlewareASGI
     from x402.http.types import RouteConfig
     from x402.mechanisms.evm.exact import ExactEvmServerScheme

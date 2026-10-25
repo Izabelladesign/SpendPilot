@@ -6,6 +6,7 @@ but payment execution remains owned by the payment services.
 
 import os
 
+from app.purchase_request_routes import router as purchase_request_router
 from dotenv import load_dotenv
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
@@ -45,6 +46,7 @@ for route in governance_router.routes:
 
 # Developer 4 shared task, budget, event, and approval routes.
 app.include_router(router)
+app.include_router(purchase_request_router)
 
 # Developer 2 payment/governance routes are namespaced under /api.
 app.include_router(payment_router)

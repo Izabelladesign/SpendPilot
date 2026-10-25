@@ -37,9 +37,11 @@ from app.schemas import (
     PaymentListResponse,
     PaymentResponse,
     PurchaseRequestStatusResponse,
+    ResearchBriefVerificationRequest,
     TaskListResponse,
     TaskResponse,
 )
+from app.services.research_brief_verifier import verify_research_brief
 
 router = APIRouter()
 
@@ -413,6 +415,89 @@ def execute_task(
         )
     )
 
+    db.commit()
+    db.refresh(task)
+
+    return _task_response(task)
+
+
+@router.post(
+    "/tasks/{task_id}/verify",
+    response_model=TaskResponse,
+    summary="Verify a returned research brief",
+    description=(
+        "Local demo endpoint: runs the server-owned research brief verifier "
+        "and records the result. It does not call a provider or execute payment."
+    ),
+)
+def verify_task_output(
+    task_id: str,
+    payload: ResearchBriefVerificationRequest,
+    request: Request,
+    db: Session = Depends(get_db),
+) -> TaskResponse:
+    """Persist a service response and complete the task only after verification."""
+
+    task = _find_task(task_id, db, request)
+
+    if task.status in {TaskStatus.COMPLETED.value, TaskStatus.FAILED.value}:
+        raise _error(
+            "invalid_state_transition",
+            "A terminal task cannot be verified again.",
+            request,
+            409,
+        )
+
+    task.status = TaskStatus.VERIFYING.value
+    task.output = {
+        "researchBrief": payload.model_dump(by_alias=True),
+    }
+    db.add(
+        AgentEvent(
+            task_id=task.id,
+            event_type="OUTPUT_RECEIVED",
+            message="Research service response received; verification started",
+            metadata_json={"sourceCount": len(payload.source_urls)},
+        )
+    )
+
+    verification = verify_research_brief(
+        summary=payload.summary,
+        copilot_section=payload.copilot_section,
+        cursor_section=payload.cursor_section,
+        pricing_section=payload.pricing_section,
+        security_section=payload.security_section,
+        source_urls=payload.source_urls,
+        unverified_information=payload.unverified_information,
+    )
+    task.output["verification"] = {
+        "status": verification.status.value,
+        "message": verification.message,
+        "checks": verification.checks,
+    }
+
+    if verification.verified:
+        task.status = TaskStatus.COMPLETED.value
+        task.failure_reason = None
+        event_type = "OUTPUT_VERIFIED"
+        event_message = "Research brief verified; task completed"
+    else:
+        task.status = TaskStatus.FAILED.value
+        task.failure_reason = verification.message
+        event_type = "VERIFICATION_FAILED"
+        event_message = "Research brief failed verification; task not completed"
+
+    db.add(
+        AgentEvent(
+            task_id=task.id,
+            event_type=event_type,
+            message=event_message,
+            metadata_json={
+                "verificationStatus": verification.status.value,
+                "checks": verification.checks,
+            },
+        )
+    )
     db.commit()
     db.refresh(task)
 

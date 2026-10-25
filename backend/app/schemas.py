@@ -91,6 +91,20 @@ class ExecuteTaskRequest(APIModel):
     idempotency_key: str = Field(alias="idempotencyKey", min_length=1, max_length=255)
 
 
+class ResearchBriefVerificationRequest(APIModel):
+    summary: str = Field(min_length=1, max_length=50_000)
+    copilot_section: str = Field(alias="copilotSection", min_length=1, max_length=50_000)
+    cursor_section: str = Field(alias="cursorSection", min_length=1, max_length=50_000)
+    pricing_section: str = Field(alias="pricingSection", min_length=1, max_length=50_000)
+    security_section: str = Field(alias="securitySection", min_length=1, max_length=50_000)
+    source_urls: list[str] = Field(alias="sourceUrls", max_length=20)
+    unverified_information: str = Field(
+        alias="unverifiedInformation",
+        min_length=1,
+        max_length=50_000,
+    )
+
+
 class BudgetResponse(APIModel):
     id: str
     name: str

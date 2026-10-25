@@ -204,3 +204,69 @@ def test_execution_summary_unknown_task_returns_contract_error(client: TestClien
 
     assert response.status_code == 404
     assert response.json()["error"]["code"] == "not_found"
+
+
+def research_brief_payload() -> dict[str, object]:
+    return {
+        "summary": "A comparison for a 50-person engineering team.",
+        "copilotSection": "GitHub Copilot pricing and security information.",
+        "cursorSection": "Cursor pricing and security information.",
+        "pricingSection": "Pricing is based on the cited public vendor pages.",
+        "securitySection": "Security details require review against current vendor documentation.",
+        "sourceUrls": [
+            "https://github.com/features/copilot",
+            "https://cursor.com/pricing",
+        ],
+        "unverifiedInformation": (
+            "Enterprise discounts and organization-specific settings are not verified."
+        ),
+    }
+
+
+def test_verified_output_completes_task_and_records_events(client: TestClient) -> None:
+    created = create_task(client)
+
+    response = client.post(
+        f"/tasks/{created['id']}/verify",
+        json=research_brief_payload(),
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["status"] == "COMPLETED"
+    assert body["output"]["verification"]["status"] == "VERIFIED"
+
+    events = client.get(f"/tasks/{created['id']}/events").json()["items"]
+    assert [event["type"] for event in events] == [
+        "TASK_CREATED",
+        "OUTPUT_RECEIVED",
+        "OUTPUT_VERIFIED",
+    ]
+
+
+def test_failed_output_does_not_complete_task(client: TestClient) -> None:
+    created = create_task(client)
+    payload = research_brief_payload()
+    payload["sourceUrls"] = ["https://github.com/features/copilot"]
+
+    response = client.post(f"/tasks/{created['id']}/verify", json=payload)
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["status"] == "FAILED"
+    assert body["output"]["verification"]["status"] == "FAILED"
+    assert "two_unique_https_sources" in body["failureReason"]
+
+    events = client.get(f"/tasks/{created['id']}/events").json()["items"]
+    assert events[-1]["type"] == "VERIFICATION_FAILED"
+
+
+def test_terminal_task_cannot_be_verified_again(client: TestClient) -> None:
+    created = create_task(client)
+    first = client.post(f"/tasks/{created['id']}/verify", json=research_brief_payload())
+    assert first.status_code == 200
+
+    second = client.post(f"/tasks/{created['id']}/verify", json=research_brief_payload())
+
+    assert second.status_code == 409
+    assert second.json()["error"]["code"] == "invalid_state_transition"

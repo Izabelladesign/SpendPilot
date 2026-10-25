@@ -244,6 +244,33 @@ Request:
 Response: `202 Accepted` with the current `Task` resource. Repeating the same
 key must not create a duplicate execution or payment.
 
+### `POST /tasks/{taskId}/verify`
+
+Local demo endpoint for submitting a returned research brief to the
+server-owned verifier. It does not call an external provider or execute a
+payment. The task becomes `COMPLETED` only when verification passes; otherwise
+it becomes `FAILED` and records a `VERIFICATION_FAILED` event.
+
+Request:
+
+```json
+{
+  "summary": "A comparison for a 50-person engineering team.",
+  "copilotSection": "GitHub Copilot information.",
+  "cursorSection": "Cursor information.",
+  "pricingSection": "Pricing information.",
+  "securitySection": "Security information.",
+  "sourceUrls": [
+    "https://github.com/features/copilot",
+    "https://cursor.com/pricing"
+  ],
+  "unverifiedInformation": "Enterprise discounts are not verified."
+}
+```
+
+Response: `200 OK` with the updated `Task` resource and verification result in
+`output.verification`.
+
 ### `GET /budgets/{budgetId}`
 
 Returns the calculated budget balances. Response: `200 OK`.

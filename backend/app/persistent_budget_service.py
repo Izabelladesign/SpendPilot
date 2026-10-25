@@ -1,5 +1,4 @@
 
-import sqlite3
 
 from app.payment_store import connect
 

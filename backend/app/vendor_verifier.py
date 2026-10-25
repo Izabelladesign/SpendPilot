@@ -1,7 +1,6 @@
 
 from dataclasses import dataclass
 
-
 BASE_SEPOLIA = "eip155:84532"
 
 BASE_SEPOLIA_USDC = (

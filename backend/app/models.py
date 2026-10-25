@@ -50,7 +50,9 @@ class PaymentStatus(StrEnum):
 
 class TimestampMixin:
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
-    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now, onupdate=utc_now)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=utc_now, onupdate=utc_now
+    )
 
 
 class User(TimestampMixin, Base):
@@ -136,16 +138,22 @@ class PurchaseRequest(TimestampMixin, Base):
     decision_reason: Mapped[str] = mapped_column(Text)
     task: Mapped[Task] = relationship(back_populates="purchase_requests")
     provider: Mapped[Provider] = relationship(back_populates="purchase_requests")
-    reservation: Mapped[BudgetReservation | None] = relationship(back_populates="purchase_request", uselist=False)
+    reservation: Mapped[BudgetReservation | None] = relationship(
+        back_populates="purchase_request", uselist=False
+    )
     payment: Mapped[Payment | None] = relationship(back_populates="purchase_request", uselist=False)
-    approval: Mapped[Approval | None] = relationship(back_populates="purchase_request", uselist=False)
+    approval: Mapped[Approval | None] = relationship(
+        back_populates="purchase_request", uselist=False
+    )
 
 
 class BudgetReservation(TimestampMixin, Base):
     __tablename__ = "budget_reservations"
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
     budget_id: Mapped[str] = mapped_column(ForeignKey("budgets.id"), index=True)
-    purchase_request_id: Mapped[str] = mapped_column(ForeignKey("purchase_requests.id"), unique=True)
+    purchase_request_id: Mapped[str] = mapped_column(
+        ForeignKey("purchase_requests.id"), unique=True
+    )
     amount: Mapped[Decimal] = mapped_column(Numeric(18, 2))
     status: Mapped[str] = mapped_column(String(32), default="ACTIVE")
     budget: Mapped[Budget] = relationship(back_populates="reservations")
@@ -156,7 +164,9 @@ class Payment(TimestampMixin, Base):
     __tablename__ = "payments"
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
     task_id: Mapped[str] = mapped_column(ForeignKey("tasks.id"), index=True)
-    purchase_request_id: Mapped[str] = mapped_column(ForeignKey("purchase_requests.id"), unique=True)
+    purchase_request_id: Mapped[str] = mapped_column(
+        ForeignKey("purchase_requests.id"), unique=True
+    )
     provider_id: Mapped[str] = mapped_column(ForeignKey("providers.id"), index=True)
     amount: Mapped[Decimal] = mapped_column(Numeric(18, 2))
     currency: Mapped[str] = mapped_column(String(3))
@@ -181,7 +191,9 @@ class Approval(TimestampMixin, Base):
     __tablename__ = "approvals"
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
     task_id: Mapped[str] = mapped_column(ForeignKey("tasks.id"), index=True)
-    purchase_request_id: Mapped[str] = mapped_column(ForeignKey("purchase_requests.id"), unique=True)
+    purchase_request_id: Mapped[str] = mapped_column(
+        ForeignKey("purchase_requests.id"), unique=True
+    )
     amount: Mapped[Decimal] = mapped_column(Numeric(18, 2))
     currency: Mapped[str] = mapped_column(String(3))
     vendor: Mapped[str] = mapped_column(String(200))

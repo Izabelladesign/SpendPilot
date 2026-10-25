@@ -13,7 +13,12 @@ def seed() -> None:
             user = User(email="demo@spendpilot.local", display_name="SpendPilot Demo")
             db.add(user)
             db.flush()
-        if not db.query(Budget).filter_by(owner_id=user.id, name="Demo operations budget").one_or_none():
+        existing_budget = (
+            db.query(Budget)
+            .filter_by(owner_id=user.id, name="Demo operations budget")
+            .one_or_none()
+        )
+        if existing_budget is None:
             db.add(
                 Budget(
                     owner_id=user.id,

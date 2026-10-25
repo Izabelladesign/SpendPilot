@@ -57,6 +57,8 @@ class ParsedTask(BaseModel):
     objective: str | None = None
     budget: Budget | None = None
     quantity: float | None = Field(default=None, gt=0)
+    quantity_unit: str | None = None
+    request_count: int | None = Field(default=None, gt=0, strict=True)
     quality_target: str | None = None
     constraints: list[str] = Field(default_factory=list)
     deadline: str | None = None
@@ -68,6 +70,7 @@ class ParsedTask(BaseModel):
 
     @field_validator(
         "objective",
+        "quantity_unit",
         "quality_target",
         "deadline",
         "expected_deliverable",
@@ -147,7 +150,8 @@ class OpenAIStructuredTaskClient:
                         "content": (
                             "Extract only facts stated in the task. Use null for missing scalar "
                             "fields and [] for missing lists. Never infer spending authorization, "
-                            "provider names, quantities, budgets, or requirements."
+                            "provider names, quantities, quantity units, request counts, "
+                            "budgets, or requirements."
                         ),
                     },
                     {"role": "user", "content": raw_task},
@@ -171,7 +175,8 @@ class OpenAIStructuredTaskClient:
 
 
 _REQUIRED_FIELDS = ("objective", "budget", "quantity", "quality_target", "constraints")
-_MODEL_FIELDS = frozenset(ParsedTask.model_fields)
+# New optional evidence fields may be absent in older structured-client outputs.
+_MODEL_FIELDS = frozenset(ParsedTask.model_fields) - {"quantity_unit", "request_count"}
 _QUESTIONS = {
     "objective": "What outcome should SpendPilot achieve?",
     "budget": "What is the maximum budget and ISO currency for this task?",

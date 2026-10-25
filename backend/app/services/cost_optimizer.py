@@ -1,7 +1,6 @@
 """Deterministic, evidence-based SP-103 provider cost comparison.
 
-Only explicit one-time prices covering the requested quantity can be compared to
-the current task budget: the shared task model has no budget period or unit.
+Prices are compared only when their one-time basis and task counts are explicit.
 This module performs no I/O and never authorizes a purchase.
 """
 
@@ -23,6 +22,7 @@ _TOTAL_PRICING_MODELS = {
     "one time total for requested quantity",
     "fixed total for requested quantity",
 }
+_ONE_TIME_PERIODS = {"one-time", "one time", "one_time"}
 _RECURRING = re.compile(
     r"(?:/\s*(?:day|week|month|year)|\b(?:daily|weekly|monthly|yearly|annual(?:ly)?|"
     r"per\s+(?:day|week|month|year))\b)",
@@ -101,7 +101,8 @@ class CostOptimizer:
             provider=best.provider,
             rationale=(
                 f"Lowest supported one-time total: {best.estimated_total} "
-                f"{best.provider.currency}. The stated quantity, quality target, and hard "
+                f"{best.provider.currency}, based on the documented pricing basis and counts. "
+                "The stated quantity, quality target, and hard "
                 "constraints have matching provider evidence. Subject to governance review."
             ),
             estimated_cost=float(best.estimated_total),
@@ -128,30 +129,67 @@ class CostOptimizer:
         task_text = " ".join(
             [task.objective or "", task.expected_deliverable or "", *task.constraints]
         )
-        if _RECURRING.search(task_text):
+        recurring_task = bool(_RECURRING.search(task_text))
+        if recurring_task:
             issues.append("Recurring task or budget period cannot be compared as a task total.")
 
         pricing_model = _normalized(provider.pricing_model or "")
+        billing_period = _normalized(provider.billing_period or "")
+        price: Decimal | None = None
         if provider.price_estimate is None:
             issues.append("Provider price is missing.")
-        elif pricing_model not in _TOTAL_PRICING_MODELS:
-            issues.append(
-                "Pricing model or period is unclear, or the total does not explicitly cover "
-                "the requested quantity."
-            )
         else:
             try:
                 price = Decimal(str(provider.price_estimate))
                 if not price.is_finite() or price < 0:
                     raise InvalidOperation
-                estimated_total = price
             except InvalidOperation:
+                price = None
                 issues.append("Provider price is not a finite, non-negative amount.")
 
         if not provider.currency:
             issues.append("Provider price currency is missing.")
         elif task.budget and provider.currency != task.budget.currency:
             issues.append("Provider currency differs from the task budget; no conversion was made.")
+
+        count: Decimal | None = None
+        if pricing_model in _TOTAL_PRICING_MODELS:
+            if billing_period and billing_period not in _ONE_TIME_PERIODS:
+                issues.append("Provider billing period is not a comparable one-time period.")
+            else:
+                count = Decimal(1)
+        elif pricing_model == "per unit":
+            if billing_period not in _ONE_TIME_PERIODS:
+                issues.append("Per-unit pricing requires an explicit one-time billing period.")
+            elif task.quantity is None or not math.isfinite(task.quantity) or task.quantity <= 0:
+                issues.append("Per-unit pricing requires a finite, positive task quantity.")
+            elif not task.quantity_unit or not provider.pricing_unit:
+                issues.append("Per-unit pricing requires explicit task and provider units.")
+            elif _normalized(task.quantity_unit) != _normalized(provider.pricing_unit):
+                issues.append("Task quantity unit and provider pricing unit do not match.")
+            else:
+                count = Decimal(str(task.quantity))
+        elif pricing_model == "per request":
+            if billing_period not in _ONE_TIME_PERIODS:
+                issues.append("Per-request pricing requires an explicit one-time billing period.")
+            elif task.request_count is None or task.request_count <= 0:
+                issues.append("Per-request pricing requires an explicit positive request count.")
+            else:
+                count = Decimal(task.request_count)
+        else:
+            issues.append(
+                "Pricing model or period is unclear, or the total does not explicitly cover "
+                "the requested quantity."
+            )
+
+        if (
+            price is not None
+            and count is not None
+            and task.budget is not None
+            and provider.currency == task.budget.currency
+            and not recurring_task
+        ):
+            estimated_total = price * count
 
         if (
             task.budget

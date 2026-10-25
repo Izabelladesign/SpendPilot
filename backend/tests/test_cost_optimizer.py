@@ -100,6 +100,138 @@ def test_recurring_task_budget_is_not_assumed_to_be_one_time() -> None:
     assert "Recurring" in " ".join(result.assessments[0].issues)
 
 
+def test_verified_per_unit_price_is_multiplied_by_task_quantity() -> None:
+    task = TASK.model_copy(update={"quantity_unit": "document"})
+    item = provider(
+        pricing_model="per unit",
+        pricing_unit="document",
+        billing_period="one-time",
+        price_estimate=0.02,
+    )
+
+    result = CostOptimizer().optimize(task, research(item))
+
+    assert result.recommendation is not None
+    assert result.ranked_options[0].estimated_total == Decimal("20.00")
+    assert result.recommendation.estimated_cost == 20
+
+
+def test_verified_per_request_price_uses_explicit_request_count() -> None:
+    task = TASK.model_copy(update={"request_count": 10})
+    item = provider(pricing_model="per request", billing_period="one-time", price_estimate=3)
+
+    result = CostOptimizer().optimize(task, research(item))
+
+    assert result.recommendation is not None
+    assert result.ranked_options[0].estimated_total == Decimal("30.0")
+
+
+def test_per_unit_total_above_budget_is_not_recommended() -> None:
+    task = TASK.model_copy(update={"quantity_unit": "document"})
+    item = provider(
+        pricing_model="per unit",
+        pricing_unit="document",
+        billing_period="one-time",
+        price_estimate=0.10,
+    )
+
+    result = CostOptimizer().optimize(task, research(item))
+
+    assert result.recommendation is None
+    assert result.assessments[0].estimated_total == Decimal("100.00")
+    assert "exceeds the task budget" in " ".join(result.assessments[0].issues)
+
+
+@pytest.mark.parametrize(
+    "task_updates, provider_updates, expected",
+    [
+        ({"quantity": None, "quantity_unit": "document"}, {}, "task quantity"),
+        ({}, {}, "explicit task and provider units"),
+        ({"quantity_unit": "page"}, {}, "do not match"),
+        ({"quantity_unit": "document"}, {"billing_period": None}, "billing period"),
+        ({"quantity_unit": "document"}, {"billing_period": "monthly"}, "billing period"),
+    ],
+)
+def test_per_unit_requires_comparable_evidence(
+    task_updates: dict[str, object], provider_updates: dict[str, object], expected: str
+) -> None:
+    task = TASK.model_copy(update=task_updates)
+    updates = {
+        "pricing_model": "per unit",
+        "pricing_unit": "document",
+        "billing_period": "one-time",
+        "price_estimate": 0.02,
+        **provider_updates,
+    }
+    result = CostOptimizer().optimize(task, research(provider(**updates)))
+
+    assert result.recommendation is None
+    assert result.assessments[0].estimated_total is None
+    assert expected in " ".join(result.assessments[0].issues)
+
+
+def test_per_request_requires_explicit_request_count() -> None:
+    item = provider(pricing_model="per request", billing_period="one-time", price_estimate=3)
+
+    result = CostOptimizer().optimize(TASK, research(item))
+
+    assert result.recommendation is None
+    assert result.assessments[0].estimated_total is None
+    assert "request count" in " ".join(result.assessments[0].issues)
+
+
+@pytest.mark.parametrize("billing_period", [None, "monthly"])
+def test_per_request_requires_comparable_billing_period(billing_period: str | None) -> None:
+    task = TASK.model_copy(update={"request_count": 10})
+    item = provider(pricing_model="per request", billing_period=billing_period, price_estimate=3)
+
+    result = CostOptimizer().optimize(task, research(item))
+
+    assert result.recommendation is None
+    assert result.assessments[0].estimated_total is None
+    assert "billing period" in " ".join(result.assessments[0].issues)
+
+
+def test_per_unit_currency_mismatch_is_not_calculated() -> None:
+    task = TASK.model_copy(update={"quantity_unit": "document"})
+    item = provider(
+        pricing_model="per unit",
+        pricing_unit="document",
+        billing_period="one-time",
+        currency="EUR",
+        price_estimate=0.02,
+    )
+
+    result = CostOptimizer().optimize(task, research(item))
+
+    assert result.recommendation is None
+    assert result.assessments[0].estimated_total is None
+    assert "currency differs" in " ".join(result.assessments[0].issues)
+
+
+def test_ranking_mixed_total_unit_and_request_prices() -> None:
+    task = TASK.model_copy(update={"quantity_unit": "document", "request_count": 10})
+    result = CostOptimizer().optimize(
+        task,
+        research(
+            provider("Total", price_estimate=25),
+            provider(
+                "Unit", pricing_model="per unit", pricing_unit="document",
+                billing_period="one-time", price_estimate=0.02,
+            ),
+            provider("Request", pricing_model="per request", billing_period="one-time",
+                     price_estimate=1),
+        ),
+    )
+
+    assert [item.provider.provider_name for item in result.ranked_options] == [
+        "Request", "Unit", "Total"
+    ]
+    assert [item.estimated_total for item in result.ranked_options] == [
+        Decimal("10.0"), Decimal("20.00"), Decimal("25.0")
+    ]
+
+
 @pytest.mark.parametrize(
     "updates, expected",
     [

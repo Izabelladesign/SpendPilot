@@ -6,7 +6,7 @@ but payment execution remains owned by the payment services.
 
 import os
 
-from dotenv import load_dotenv
+from app.purchase_request_routes import router as purchase_request_router
 from dotenv import load_dotenv
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
@@ -18,19 +18,22 @@ from app.payment_routes import router as payment_router
 from app.payment_store import initialize_database
 from app.persistent_budget_service import initialize_budget_database
 from app.task_routes import router as task_router
-from app.payment_routes import router as payment_router
-from app.task_routes import router as task_router
-from app.payment_store import initialize_database
-from app.persistent_budget_service import initialize_budget_database
-from app.governance_routes import router as governance_router
 
 load_dotenv()
 
 app = FastAPI(title="SpendPilot API", version="0.1.0")
 
+allowed_origins = [
+    origin.strip()
+    for origin in os.getenv(
+        "CORS_ORIGINS",
+        "http://localhost:3000,http://127.0.0.1:3000",
+    ).split(",")
+    if origin.strip()
+]
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:3000", "http://127.0.0.1:3000"],
+    allow_origins=allowed_origins,
     allow_credentials=False,
     allow_methods=["GET", "POST", "OPTIONS"],
     allow_headers=["Content-Type"],
@@ -43,6 +46,7 @@ for route in governance_router.routes:
 
 # Developer 4 shared task, budget, event, and approval routes.
 app.include_router(router)
+app.include_router(purchase_request_router)
 
 # Developer 2 payment/governance routes are namespaced under /api.
 app.include_router(payment_router)

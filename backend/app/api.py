@@ -1,3 +1,4 @@
+
 """Shared REST endpoints for tasks, events, budgets, payments, and approvals."""
 
 from __future__ import annotations
@@ -7,10 +8,20 @@ from decimal import Decimal
 from uuid import uuid4
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
+from sqlalchemy import update
 from sqlalchemy.orm import Session
 
 from app.database import get_db
-from app.models import AgentEvent, Approval, Budget, Payment, Task, TaskStatus, User
+from app.reviewer_auth import require_reviewer
+from app.models import (
+    AgentEvent,
+    Approval,
+    Budget,
+    Payment,
+    Task,
+    TaskStatus,
+    User,
+)
 from app.schemas import (
     AgentEventResponse,
     ApprovalDecisionRequest,
@@ -23,40 +34,62 @@ from app.schemas import (
     ExecuteTaskRequest,
     PaymentListResponse,
     PaymentResponse,
+    TaskListResponse,
     TaskResponse,
 )
 
 router = APIRouter()
 
 
-def _error(code: str, message: str, request: Request, status_code: int) -> HTTPException:
+def _error(
+    code: str,
+    message: str,
+    request: Request,
+    status_code: int,
+) -> HTTPException:
     request_id = request.headers.get("x-request-id", str(uuid4()))
     return HTTPException(
         status_code=status_code,
         detail=ErrorResponse(
-            error=ErrorBody(code=code, message=message, request_id=request_id)
+            error=ErrorBody(
+                code=code,
+                message=message,
+                request_id=request_id,
+            )
         ).model_dump(by_alias=True),
     )
 
 
 def _find_task(task_id: str, db: Session, request: Request) -> Task:
     task = db.get(Task, task_id)
+
     if task is None:
         raise _error("not_found", "Task was not found.", request, 404)
+
     return task
 
 
 def _demo_user(db: Session) -> User:
-    user = db.query(User).filter_by(email="demo@spendpilot.local").one_or_none()
+    user = (
+        db.query(User)
+        .filter_by(email="demo@spendpilot.local")
+        .one_or_none()
+    )
+
     if user is None:
-        user = User(email="demo@spendpilot.local", display_name="SpendPilot Demo")
+        user = User(
+            email="demo@spendpilot.local",
+            display_name="SpendPilot Demo",
+        )
         db.add(user)
         db.flush()
+
     return user
 
 
 def _task_response(task: Task) -> TaskResponse:
     budget = task.budget
+
     return TaskResponse(
         id=task.id,
         userId=task.user_id,
@@ -152,16 +185,31 @@ def create_task(
     db: Session = Depends(get_db),
 ) -> TaskResponse:
     user = db.get(User, payload.user_id) if payload.user_id else _demo_user(db)
+
     if user is None:
         raise _error("not_found", "User was not found.", request, 404)
 
     budget = db.get(Budget, payload.budget_id) if payload.budget_id else None
+
     if payload.budget_id and budget is None:
         raise _error("not_found", "Budget was not found.", request, 404)
+
     if budget and budget.owner_id != user.id:
-        raise _error("forbidden", "The budget does not belong to the user.", request, 403)
+        raise _error(
+            "forbidden",
+            "The budget does not belong to the user.",
+            request,
+            403,
+        )
+
     if budget and budget.currency != payload.budget.currency:
-        raise _error("validation_error", "Task and budget currencies must match.", request, 422)
+        raise _error(
+            "validation_error",
+            "Task and budget currencies must match.",
+            request,
+            422,
+        )
+
     if budget is None:
         budget = Budget(
             owner_id=user.id,
@@ -180,8 +228,10 @@ def create_task(
         quality_target=payload.quality_target,
         constraints=payload.constraints,
     )
+
     db.add(task)
     db.flush()
+
     db.add(
         AgentEvent(
             task_id=task.id,
@@ -190,24 +240,50 @@ def create_task(
             metadata_json={},
         )
     )
+
     db.commit()
     db.refresh(task)
+
     return _task_response(task)
 
 
+@router.get("/tasks", response_model=TaskListResponse)
+def list_tasks(
+    request: Request,
+    task_status: str | None = Query(default=None, alias="status"),
+    limit: int = Query(default=50, ge=1, le=100),
+    db: Session = Depends(get_db),
+) -> TaskListResponse:
+    query = db.query(Task).order_by(Task.updated_at.desc())
+    if task_status:
+        query = query.filter(Task.status == task_status)
+    tasks = query.limit(limit).all()
+    return TaskListResponse(items=[_task_response(task) for task in tasks])
+
+
 @router.get("/tasks/{task_id}", response_model=TaskResponse)
-def get_task(task_id: str, request: Request, db: Session = Depends(get_db)) -> TaskResponse:
+def get_task(
+    task_id: str,
+    request: Request,
+    db: Session = Depends(get_db),
+) -> TaskResponse:
     return _task_response(_find_task(task_id, db, request))
 
 
-@router.get("/tasks/{task_id}/events", response_model=EventListResponse)
+@router.get(
+    "/tasks/{task_id}/events",
+    response_model=EventListResponse,
+)
 def get_task_events(
     task_id: str,
     request: Request,
     db: Session = Depends(get_db),
 ) -> EventListResponse:
     task = _find_task(task_id, db, request)
-    return EventListResponse(items=[_event_response(event) for event in task.events])
+
+    return EventListResponse(
+        items=[_event_response(event) for event in task.events]
+    )
 
 
 @router.post(
@@ -222,46 +298,73 @@ def execute_task(
     db: Session = Depends(get_db),
 ) -> TaskResponse:
     task = _find_task(task_id, db, request)
+
     duplicate = (
         db.query(AgentEvent)
-        .filter(AgentEvent.task_id == task.id, AgentEvent.event_type == "EXECUTION_REQUESTED")
+        .filter(
+            AgentEvent.task_id == task.id,
+            AgentEvent.event_type == "EXECUTION_REQUESTED",
+        )
         .all()
     )
+
     if any(
         event.metadata_json.get("idempotencyKey") == payload.idempotency_key
         for event in duplicate
     ):
         return _task_response(task)
-    if task.status in {TaskStatus.COMPLETED.value, TaskStatus.FAILED.value}:
+
+    if task.status in {
+        TaskStatus.COMPLETED.value,
+        TaskStatus.FAILED.value,
+    }:
         raise _error(
             "invalid_state_transition",
             "A terminal task cannot be executed again.",
             request,
             409,
         )
+
     task.status = TaskStatus.RESEARCHING.value
+
     db.add(
         AgentEvent(
             task_id=task.id,
             event_type="EXECUTION_REQUESTED",
             message="Execution handed to the agent workflow",
-            metadata_json={"idempotencyKey": payload.idempotency_key},
+            metadata_json={
+                "idempotencyKey": payload.idempotency_key,
+            },
         )
     )
+
     db.commit()
     db.refresh(task)
+
     return _task_response(task)
 
 
-@router.get("/budgets/{budget_id}", response_model=BudgetResponse)
-def get_budget(budget_id: str, request: Request, db: Session = Depends(get_db)) -> BudgetResponse:
+@router.get(
+    "/budgets/{budget_id}",
+    response_model=BudgetResponse,
+)
+def get_budget(
+    budget_id: str,
+    request: Request,
+    db: Session = Depends(get_db),
+) -> BudgetResponse:
     budget = db.get(Budget, budget_id)
+
     if budget is None:
         raise _error("not_found", "Budget was not found.", request, 404)
+
     return _budget_response(budget)
 
 
-@router.get("/payments", response_model=PaymentListResponse)
+@router.get(
+    "/payments",
+    response_model=PaymentListResponse,
+)
 def get_payments(
     request: Request,
     task_id: str | None = Query(default=None, alias="taskId"),
@@ -270,28 +373,115 @@ def get_payments(
     db: Session = Depends(get_db),
 ) -> PaymentListResponse:
     query = db.query(Payment).order_by(Payment.created_at.desc())
+
     if task_id:
         query = query.filter(Payment.task_id == task_id)
+
     if payment_status:
         query = query.filter(Payment.status == payment_status)
+
     payments = query.limit(limit).all()
-    return PaymentListResponse(items=[_payment_response(payment) for payment in payments])
+
+    return PaymentListResponse(
+        items=[_payment_response(payment) for payment in payments]
+    )
 
 
-@router.post("/approvals/{approval_id}/decision", response_model=ApprovalResponse)
+@router.post(
+    "/approvals/{approval_id}/decision",
+    response_model=ApprovalResponse,
+)
 def decide_approval(
     approval_id: str,
     payload: ApprovalDecisionRequest,
     request: Request,
+    reviewer_email: str = Depends(require_reviewer),
     db: Session = Depends(get_db),
 ) -> ApprovalResponse:
+
+    # 1. Verify reviewer identity.
+    reviewer = (
+        db.query(User)
+        .filter_by(email=reviewer_email)
+        .one_or_none()
+    )
+
+    if reviewer is None:
+        raise _error(
+            "forbidden",
+            "Reviewer account is not authorized.",
+            request,
+            403,
+        )
+
+    # 2. Verify the approval exists.
     approval = db.get(Approval, approval_id)
+
     if approval is None:
-        raise _error("not_found", "Approval was not found.", request, 404)
-    if approval.status != "PENDING":
-        raise _error("duplicate_request", "This approval has already been decided.", request, 409)
-    approval.status = payload.decision
-    approval.decided_at = datetime.now(timezone.utc)
+        raise _error(
+            "not_found",
+            "Approval was not found.",
+            request,
+            404,
+        )
+
+    # 3. Verify task and purchase request consistency.
+    task = db.get(Task, approval.task_id)
+    purchase = approval.purchase_request
+
+    if task is None or purchase is None:
+        raise _error(
+            "invalid_approval",
+            "Approval is missing its task or purchase request.",
+            request,
+            409,
+        )
+
+    if purchase.task_id != task.id:
+        raise _error(
+            "invalid_approval",
+            "Approval and purchase request belong to different tasks.",
+            request,
+            409,
+        )
+
+    # 4. Prevent users from approving their own purchases.
+    if task.user_id == reviewer.id:
+        raise _error(
+            "forbidden",
+            "You cannot approve your own purchase.",
+            request,
+            403,
+        )
+
+    # 5. Atomically update approval.
+    # Only one request can change PENDING to a final status.
+    decision_time = datetime.now(timezone.utc)
+
+    result = db.execute(
+        update(Approval)
+        .where(
+            Approval.id == approval_id,
+            Approval.status == "PENDING",
+        )
+        .values(
+            status=payload.decision,
+            decided_by=reviewer.id,
+            decided_at=decision_time,
+        )
+        .execution_options(synchronize_session=False)
+    )
+
+    if result.rowcount != 1:
+        db.rollback()
+        raise _error(
+            "duplicate_request",
+            "This approval has already been decided.",
+            request,
+            409,
+        )
+
+    # 6. Record the decision in the audit trail.
     db.add(
         AgentEvent(
             task_id=approval.task_id,
@@ -299,10 +489,15 @@ def decide_approval(
             message=f"Approval {payload.decision.lower()}",
             metadata_json={
                 "approvalId": approval.id,
+                "reviewerId": reviewer.id,
                 "comment": payload.comment,
             },
         )
     )
+
+    # 7. Commit and reload the approval.
     db.commit()
+    db.expire(approval)
     db.refresh(approval)
+
     return _approval_response(approval)

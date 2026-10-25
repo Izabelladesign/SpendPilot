@@ -165,6 +165,15 @@ never appear in API responses or event metadata.
 
 ## Endpoints
 
+### `GET /tasks`
+
+Returns the most recently updated tasks for dashboard and workspace views.
+Optional filters are `status` and `limit` (1–100). Response:
+
+```json
+{ "items": [], "nextCursor": null }
+```
+
 ### `POST /tasks`
 
 Creates a task in `REQUESTED` state. It stores an intake specification but does

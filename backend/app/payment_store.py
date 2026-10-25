@@ -1,9 +1,16 @@
 
 import json
+import os
 import sqlite3
 from pathlib import Path
 
-DB_PATH = Path(__file__).resolve().parent.parent / "spendpilot.db"
+
+DB_PATH = Path(
+    os.getenv(
+        "PAYMENT_DATABASE_PATH",
+        str(Path(__file__).resolve().parent.parent / "payment_ledger.db"),
+    )
+)
 
 VALID_STATUSES = {
     "IN_PROGRESS",

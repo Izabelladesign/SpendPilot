@@ -1,6 +1,6 @@
 """Deterministic, evidence-based SP-103 provider cost comparison.
 
-Prices are compared only when their one-time basis and task counts are explicit.
+Prices are compared only when their basis, billing conditions, and counts are explicit.
 This module performs no I/O and never authorizes a purchase.
 """
 
@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import math
 import re
-from decimal import Decimal, InvalidOperation
+from decimal import Decimal, DecimalException, Inexact, InvalidOperation, localcontext
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -97,10 +97,15 @@ class CostOptimizer:
 
         best = ranked[0]
         assert best.estimated_total is not None
+        basis = (
+            "incremental cost in the current monthly billing period"
+            if _normalized(best.provider.pricing_model or "") == "monthly tiered usage"
+            else "one-time total"
+        )
         recommendation = OptimizerRecommendation(
             provider=best.provider,
             rationale=(
-                f"Lowest supported one-time total: {best.estimated_total} "
+                f"Lowest supported {basis}: {best.estimated_total} "
                 f"{best.provider.currency}, based on the documented pricing basis and counts. "
                 "The stated quantity, quality target, and hard "
                 "constraints have matching provider evidence. Subject to governance review."
@@ -135,10 +140,11 @@ class CostOptimizer:
 
         pricing_model = _normalized(provider.pricing_model or "")
         billing_period = _normalized(provider.billing_period or "")
+        is_monthly = pricing_model == "monthly tiered usage"
         price: Decimal | None = None
-        if provider.price_estimate is None:
+        if provider.price_estimate is None and not is_monthly:
             issues.append("Provider price is missing.")
-        else:
+        elif provider.price_estimate is not None and not is_monthly:
             try:
                 price = Decimal(str(provider.price_estimate))
                 if not price.is_finite() or price < 0:
@@ -153,7 +159,19 @@ class CostOptimizer:
             issues.append("Provider currency differs from the task budget; no conversion was made.")
 
         count: Decimal | None = None
-        if pricing_model in _TOTAL_PRICING_MODELS:
+        if is_monthly:
+            monthly_total, monthly_issues = CostOptimizer._monthly_incremental_cost(
+                task,
+                provider,
+                comparable=(
+                    task.budget is not None
+                    and provider.currency == task.budget.currency
+                    and not recurring_task
+                ),
+            )
+            issues.extend(monthly_issues)
+            estimated_total = monthly_total
+        elif pricing_model in _TOTAL_PRICING_MODELS:
             if billing_period and billing_period not in _ONE_TIME_PERIODS:
                 issues.append("Provider billing period is not a comparable one-time period.")
             else:
@@ -241,3 +259,84 @@ class CostOptimizer:
             estimated_total=estimated_total,
             issues=issues,
         )
+
+    @staticmethod
+    def _monthly_incremental_cost(
+        task: ParsedTask, provider: ProviderRecord, *, comparable: bool
+    ) -> tuple[Decimal | None, list[str]]:
+        """Compute marginal cost only with a complete cited schedule and account context."""
+
+        issues: list[str] = []
+        if _normalized(provider.billing_period or "") != "monthly":
+            issues.append("Monthly tier pricing requires an explicit monthly billing period.")
+        if task.quantity is None or not math.isfinite(task.quantity) or task.quantity <= 0:
+            issues.append("Monthly tier pricing requires a finite, positive task quantity.")
+        if not task.quantity_unit or not provider.pricing_unit:
+            issues.append("Monthly tier pricing requires explicit task and provider units.")
+        elif _normalized(task.quantity_unit) != _normalized(provider.pricing_unit):
+            issues.append("Task quantity unit and monthly pricing unit do not match.")
+        if provider.monthly_usage_before is None:
+            issues.append(
+                "Prior monthly account usage is missing; free-tier eligibility is unknown."
+            )
+        elif not provider.monthly_usage_before.is_finite() or provider.monthly_usage_before < 0:
+            issues.append("Prior monthly account usage must be finite and non-negative.")
+        if not provider.pricing_source_url or provider.pricing_retrieved_at is None:
+            issues.append("A pricing source URL and retrieval time are required for monthly tiers.")
+        if not provider.monthly_usage_source_url or provider.monthly_usage_retrieved_at is None:
+            issues.append("A prior-usage source URL and retrieval time are required.")
+        if provider.monthly_additional_charges is None:
+            issues.append(
+                "Task-specific taxes and fees must be explicitly supplied, including zero."
+            )
+        elif (
+            not provider.monthly_additional_charges.is_finite()
+            or provider.monthly_additional_charges < 0
+        ):
+            issues.append("Task-specific taxes and fees must be finite and non-negative.")
+        if provider.monthly_conditions_confirmed is not True:
+            issues.append("Monthly tier eligibility and billing conditions are not confirmed.")
+
+        tiers = provider.monthly_price_tiers
+        if not tiers or tiers[-1].up_to is not None:
+            issues.append(
+                "A complete monthly tier schedule ending with an unbounded tier is required."
+            )
+        previous = Decimal(0)
+        for index, tier in enumerate(tiers):
+            if not tier.price_per_unit.is_finite() or tier.price_per_unit < 0:
+                issues.append("Monthly tier prices must be finite and non-negative.")
+                break
+            if tier.up_to is None:
+                if index != len(tiers) - 1:
+                    issues.append("Only the final monthly tier may be unbounded.")
+                    break
+            elif not tier.up_to.is_finite() or tier.up_to <= previous:
+                issues.append("Monthly tier bounds must be strictly increasing and positive.")
+                break
+            else:
+                previous = tier.up_to
+
+        if issues or not comparable:
+            return None, issues
+
+        # The checks above establish these values and the tier schedule.
+        assert task.quantity is not None
+        assert provider.monthly_usage_before is not None
+        assert provider.monthly_additional_charges is not None
+        try:
+            with localcontext() as context:
+                context.prec = 50
+                context.traps[Inexact] = True
+                start = provider.monthly_usage_before
+                end = start + Decimal(str(task.quantity))
+                lower = Decimal(0)
+                total = Decimal(0)
+                for tier in tiers:
+                    upper = tier.up_to if tier.up_to is not None else end
+                    charged_units = max(Decimal(0), min(end, upper) - max(start, lower))
+                    total += charged_units * tier.price_per_unit
+                    lower = upper
+                return total + provider.monthly_additional_charges, issues
+        except DecimalException:
+            return None, ["Monthly calculation exceeds supported exact decimal precision."]

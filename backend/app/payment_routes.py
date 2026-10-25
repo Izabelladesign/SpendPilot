@@ -490,3 +490,61 @@ async def execute_approved_purchase_x402(
         "idempotency_key": key,
         "transaction_hash": tx_hash,
     }
+
+@router.get("/payments/purchase/{purchase_request_id}/evidence")
+def read_purchase_settlement_evidence(
+    purchase_request_id: str,
+    operator: str = Depends(require_payment_operator),
+    db: Session = Depends(get_db),
+):
+    """Read verified Base Sepolia evidence; never sign or broadcast."""
+    from app.models import Payment, BudgetReservation
+    from app.payment_store import connect
+    from app.vendor_verifier import TRUSTED_VENDORS
+
+    purchase = db.get(PurchaseRequest, purchase_request_id)
+    if purchase is None:
+        raise HTTPException(404, "Purchase request not found")
+    payment = db.query(Payment).filter_by(purchase_request_id=purchase.id).one_or_none()
+    if payment is None:
+        raise HTTPException(404, "Shared payment not found")
+
+    key = f"shared-payment:{payment.id}"
+    governed = payment_store.get_payment(key)
+    governed_status = governed["status"] if governed else "NOT_PREPARED"
+    reservation = db.query(BudgetReservation).filter_by(purchase_request_id=purchase.id).one_or_none()
+    vendor_name = (purchase.provider.metadata_json or {}).get("x402_vendor_name", "") if purchase.provider else ""
+    vendor = TRUSTED_VENDORS.get(vendor_name)
+    with connect() as conn:
+        row = conn.execute(
+            "SELECT transaction_hash, verified_at FROM verified_settlements WHERE idempotency_key = ?",
+            (key,),
+        ).fetchone()
+
+    # A transaction is displayed as verified only after BOTH ledgers agree.
+    settled = bool(
+        row and row[0]
+        and governed_status == "PAID"
+        and payment.status == "PAID"
+        and reservation is not None
+        and reservation.status == "COMMITTED"
+        and payment.transaction_reference == row[0]
+    )
+    return {
+        "purchase_request_id": purchase.id,
+        "payment_id": payment.id,
+        "idempotency_key": key,
+        "status": "PAID" if settled else ("PENDING_RECONCILIATION" if row else governed_status),
+        "shared_payment_status": payment.status,
+        "governed_payment_status": governed_status,
+        "settlement_verified": settled,
+        "transaction_hash": row[0] if settled else None,
+        "verified_at": row[1] if settled else None,
+        "network": vendor.network if vendor else None,
+        "asset": vendor.asset if vendor else None,
+        "recipient": vendor.recipient if vendor else None,
+        "amount_usd": str(purchase.amount),
+        "evidence_type": "verified_onchain" if settled else "not_verified",
+        "research_verification_status": "SEPARATE_FROM_PAYMENT",
+    }
+

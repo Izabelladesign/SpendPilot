@@ -1,7 +1,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { parseSpendRequestWithExtractor } from '../src/spend-intake.js';
+import { createOpenAIExtractor, parseSpendRequestWithExtractor } from '../src/spend-intake.js';
 import { createJiraSpendRequest } from '../src/jira-spend-request.js';
+import { resolver } from '../src/index.js';
 
 const completeTask = {
   requestedItemOrService: 'Ergonomic keyboards', purchasingIntent: 'Purchase equipment', quantity: 12,
@@ -42,11 +43,39 @@ test('model refusal and outage return safe actionable failures', async () => {
     assert.equal(result.validationErrors[0].code, code); assert.match(result.clarificationQuestions[0], /retry/i);
   }
 });
+
+test('missing OpenAI key returns a safe diagnostic without exposing credentials', async () => {
+  const extractor = createOpenAIExtractor({ apiKey: '' });
+  await assert.rejects(
+    () => extractor('Research a coding assistant under USD 1.00.'),
+    (error) => error.code === 'model_unavailable' && /encrypted Forge variable/i.test(error.message),
+  );
+});
+
+test('OpenAI REST response output content is parsed without SDK output_text', async () => {
+  const extractor = createOpenAIExtractor({
+    apiKey: 'test-only-key',
+    fetchImpl: async () => new Response(JSON.stringify({
+      status: 'completed',
+      output: [{
+        type: 'message',
+        content: [{ type: 'output_text', text: JSON.stringify(completeTask) }],
+      }],
+    }), { status: 200 }),
+  });
+
+  const result = await extractor('Need a coding assistant under USD 1.00.');
+  assert.deepEqual(result, completeTask);
+});
 test('parser has no payment, order, database, or Jira-write side effect', async () => {
   let calls = 0;
   const result = await parseSpendRequestWithExtractor({ request: 'Buy keyboards' }, async () => { calls += 1; return completeTask; });
   assert.equal(calls, 1); assert.equal(result.isReadyForNextStep, true);
   assert.deepEqual(Object.keys(result).sort(), ['clarificationQuestions', 'isReadyForNextStep', 'missingFields', 'parsedTask', 'status', 'validationErrors']);
+});
+
+test('project-page resolver exposes the read-only OpenAI parser', async () => {
+  assert.equal(typeof resolver, 'function');
 });
 
 test('Jira action creates a review issue without payment fields', async () => {

@@ -19,14 +19,53 @@ const initialForm = {
   constraints: 'Research only, human approval required',
 };
 
+const initialRequest = 'We need a managed coding assistant for a 50-person engineering team. Compare GitHub Copilot and Cursor, keep the research budget under 1.00 USD, include pricing and security sources, and require human approval before any purchase.';
+
 const ProjectPage = () => {
   const [form, setForm] = useState(initialForm);
+  const [naturalLanguageRequest, setNaturalLanguageRequest] = useState(initialRequest);
+  const [parseResult, setParseResult] = useState(null);
+  const [parsing, setParsing] = useState(false);
   const [busy, setBusy] = useState(false);
   const [result, setResult] = useState(null);
   const [error, setError] = useState('');
 
   const update = (field) => (event) => {
     setForm((current) => ({ ...current, [field]: event.target.value }));
+  };
+
+  const parseRequest = async () => {
+    setParsing(true);
+    setParseResult(null);
+    setError('');
+    try {
+      const response = await invoke('parseSpendRequest', { request: naturalLanguageRequest });
+      setParseResult(response);
+      if (response.isReadyForNextStep && response.parsedTask) {
+        const task = response.parsedTask;
+        const constraints = [
+          ...(task.constraints || []),
+          ...(task.merchantOrBrandConstraints || []),
+          task.deadline ? `Deadline: ${task.deadline}` : '',
+          'Human approval required',
+        ].filter(Boolean);
+        setForm((current) => ({
+          ...current,
+          summary: `Research ${task.requestedItemOrService}`,
+          description: [
+            task.businessPurpose,
+            task.expectedDeliverable,
+            task.qualityTarget ? `Quality target: ${task.qualityTarget}` : '',
+          ].filter(Boolean).join('\n'),
+          budget: `${task.budget.amount.toFixed(2)} ${task.budget.currency}`,
+          constraints: constraints.join(', '),
+        }));
+      }
+    } catch {
+      setError('SpendPilot could not reach the OpenAI intake parser. Confirm the encrypted Forge variable and deployment.');
+    } finally {
+      setParsing(false);
+    }
   };
 
   const submit = async () => {
@@ -57,6 +96,41 @@ const ProjectPage = () => {
       <SectionMessage appearance="information" title="Safe Jira workflow">
         <Text>SpendPilot will create a Task in this project for review. Human approval, vendor selection, and payment remain separate steps.</Text>
       </SectionMessage>
+
+      <Stack space="space.200">
+        <Stack space="space.100">
+          <Heading size="medium">Describe the request naturally</Heading>
+          <Text>SpendPilot uses the encrypted OpenAI key to structure the request. The parser is read-only and never authorizes spending.</Text>
+        </Stack>
+        <TextArea
+          id="natural-language-request"
+          value={naturalLanguageRequest}
+          minimumRows={5}
+          onChange={(event) => setNaturalLanguageRequest(event.target.value)}
+        />
+        <Button appearance="default" isDisabled={parsing || !naturalLanguageRequest.trim()} onClick={parseRequest}>
+          {parsing ? 'Parsing request with OpenAI…' : 'Parse request with OpenAI'}
+        </Button>
+        {parseResult ? (
+          <SectionMessage
+            appearance={parseResult.isReadyForNextStep ? 'confirmation' : parseResult.status === 'intake_unavailable' ? 'error' : 'warning'}
+            title={parseResult.isReadyForNextStep ? 'Request structured' : parseResult.status === 'intake_unavailable' ? 'OpenAI parser unavailable' : 'Clarification needed'}
+          >
+            {parseResult.isReadyForNextStep ? (
+              <Text>OpenAI extracted the request. Review the populated Jira fields below before creating the issue.</Text>
+            ) : parseResult.status === 'intake_unavailable' ? (
+              <Stack space="space.050">
+                <Text>{parseResult.validationErrors?.[0]?.message || 'The OpenAI intake service could not be reached.'}</Text>
+                <Text>No Jira issue or spend action was taken.</Text>
+              </Stack>
+            ) : (
+              <Stack space="space.050">
+                {(parseResult.clarificationQuestions || ['The request could not be structured safely.']).map((question) => <Text key={question}>{question}</Text>)}
+              </Stack>
+            )}
+          </SectionMessage>
+        ) : null}
+      </Stack>
 
       <Stack space="space.200">
         <Stack space="space.050">

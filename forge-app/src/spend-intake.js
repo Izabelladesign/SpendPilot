@@ -66,6 +66,7 @@ export const createOpenAIExtractor = ({ fetchImpl = api.fetch, apiKey = process.
   if (!apiKey) {
     const error = new Error('OPENAI_API_KEY is not configured as an encrypted Forge variable.');
     error.code = 'model_unavailable';
+    console.warn('SpendPilot OpenAI intake unavailable', { reason: 'missing_key' });
     throw error;
   }
   let response;
@@ -79,19 +80,33 @@ export const createOpenAIExtractor = ({ fetchImpl = api.fetch, apiKey = process.
       }),
     });
   } catch {
+    console.warn('SpendPilot OpenAI intake unavailable', { reason: 'network_error' });
     const error = new Error('The structured extraction service is unavailable.'); error.code = 'model_unavailable'; throw error;
   }
   if (!response.ok) {
+    console.warn('SpendPilot OpenAI intake rejected', { reason: 'http_error', status: response.status });
     const error = new Error(`The structured extraction service returned HTTP ${response.status}.`); error.code = 'model_unavailable'; throw error;
   }
   const body = await response.json();
   const refusal = body.output?.flatMap((item) => item.content || []).some((content) => content.type === 'refusal');
   if (refusal || body.status === 'incomplete') {
+    console.warn('SpendPilot OpenAI intake incomplete', { reason: refusal ? 'model_refusal' : 'incomplete_response' });
     const error = new Error('The structured extraction service could not process this request.'); error.code = 'model_refused'; throw error;
   }
-  // The provider schema-constrains output_text; parsing only decodes its
-  // transport representation. The application boundary validation follows.
-  try { return JSON.parse(body.output_text); } catch {
+  // The raw REST response returns generated text inside output message content.
+  // `output_text` is an SDK convenience property, so do not assume it exists
+  // when using Forge's fetch API directly.
+  const outputText = typeof body.output_text === 'string'
+    ? body.output_text
+    : Array.isArray(body.output)
+      ? body.output
+        .flatMap((item) => Array.isArray(item.content) ? item.content : [])
+        .filter((content) => content.type === 'output_text' && typeof content.text === 'string')
+        .map((content) => content.text)
+        .join('')
+      : '';
+  try { return JSON.parse(outputText); } catch {
+    console.warn('SpendPilot OpenAI intake malformed', { reason: 'malformed_structured_output' });
     const error = new Error('The structured extraction service returned malformed structured data.'); error.code = 'malformed_model_output'; throw error;
   }
 };

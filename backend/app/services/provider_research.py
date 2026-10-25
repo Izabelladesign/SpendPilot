@@ -12,6 +12,7 @@ import json
 import os
 import re
 from datetime import UTC, datetime
+from decimal import Decimal
 from enum import StrEnum
 from typing import Any, Callable, Mapping, Protocol
 from urllib.error import HTTPError, URLError
@@ -35,6 +36,15 @@ class ResearchStatus(StrEnum):
     INCOMPLETE_TASK = "incomplete_task"
 
 
+class MonthlyPriceTier(BaseModel):
+    """Marginal per-unit price through an exclusive cumulative upper bound."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    up_to: Decimal | None = Field(gt=0, allow_inf_nan=False)
+    price_per_unit: Decimal = Field(ge=0, allow_inf_nan=False)
+
+
 class ProviderRecord(BaseModel):
     """Normalized public provider evidence, not a purchase recommendation."""
 
@@ -46,10 +56,18 @@ class ProviderRecord(BaseModel):
     pricing_model: str | None = None
     pricing_unit: str | None = None
     billing_period: str | None = None
+    monthly_price_tiers: list[MonthlyPriceTier] = Field(default_factory=list)
+    monthly_usage_before: Decimal | None = Field(default=None, ge=0, allow_inf_nan=False)
+    monthly_usage_source_url: str | None = None
+    monthly_usage_retrieved_at: datetime | None = None
+    monthly_additional_charges: Decimal | None = Field(default=None, ge=0, allow_inf_nan=False)
+    monthly_conditions_confirmed: bool | None = Field(default=None, strict=True)
     price_estimate: float | None = Field(default=None, ge=0)
     currency: str | None = Field(default=None, pattern=r"^[A-Z]{3}$")
     source_url: str
     retrieved_at: datetime
+    pricing_source_url: str | None = None
+    pricing_retrieved_at: datetime | None = None
     constraints: list[str] = Field(default_factory=list)
     limitations: list[str] = Field(default_factory=list)
     quality_claims: list[str] = Field(default_factory=list)
@@ -58,19 +76,23 @@ class ProviderRecord(BaseModel):
     is_eligible: bool = False
     compatibility_warnings: list[str] = Field(default_factory=list)
 
-    @field_validator("source_url")
+    @field_validator("source_url", "pricing_source_url", "monthly_usage_source_url")
     @classmethod
-    def source_url_must_be_public_http(cls, value: str) -> str:
+    def source_url_must_be_public_http(cls, value: str | None) -> str | None:
         """Require a source reference without fetching or trusting its content."""
 
+        if value is None:
+            return None
         parsed = urlparse(value)
         if parsed.scheme not in {"http", "https"} or not parsed.netloc:
             raise ValueError("source_url must be an absolute HTTP(S) URL")
         return value
 
-    @field_validator("retrieved_at")
+    @field_validator("retrieved_at", "pricing_retrieved_at", "monthly_usage_retrieved_at")
     @classmethod
-    def retrieval_time_must_include_timezone(cls, value: datetime) -> datetime:
+    def retrieval_time_must_include_timezone(cls, value: datetime | None) -> datetime | None:
+        if value is None:
+            return None
         if value.tzinfo is None:
             raise ValueError("retrieved_at must include a timezone")
         return value
@@ -407,12 +429,32 @@ class ProviderResearchAgent:
         else:
             status = ResearchStatus.COMPLETE
 
-        source_urls = list(dict.fromkeys(str(record.source_url) for record in valid_records))
+        source_urls = list(
+            dict.fromkeys(
+                url
+                for record in valid_records
+                for url in (
+                    record.source_url,
+                    record.pricing_source_url,
+                    record.monthly_usage_source_url,
+                )
+                if url is not None
+            )
+        )
         return ProviderResearchResult(
             providers=valid_records,
             research_status=status,
             source_urls=source_urls,
-            retrieved_at=max(record.retrieved_at for record in valid_records),
+            retrieved_at=max(
+                timestamp
+                for record in valid_records
+                for timestamp in (
+                    record.retrieved_at,
+                    record.pricing_retrieved_at,
+                    record.monthly_usage_retrieved_at,
+                )
+                if timestamp is not None
+            ),
             warnings=warnings,
         )
 
@@ -456,13 +498,22 @@ class ProviderResearchAgent:
             if objective_tokens and not objective_tokens.intersection(capability_tokens):
                 warnings.append("Provider capabilities do not clearly match the stated objective.")
 
-        if record.price_estimate is None or record.currency is None:
+        has_monthly_tiers = (
+            (record.pricing_model or "").strip().casefold() == "monthly tiered usage"
+            and bool(record.monthly_price_tiers)
+        )
+        if (record.price_estimate is None and not has_monthly_tiers) or record.currency is None:
             warnings.append("Provider pricing or currency is unavailable.")
-        elif task.budget and record.currency == task.budget.currency:
+        elif (
+            record.price_estimate is not None
+            and not has_monthly_tiers
+            and task.budget
+            and record.currency == task.budget.currency
+        ):
             if record.price_estimate > task.budget.amount:
                 warnings.append("Provider price estimate exceeds the task budget.")
                 eligible = False
-        elif task.budget:
+        elif task.budget and record.currency != task.budget.currency:
             warnings.append(
                 "Provider currency differs from the task budget and cannot be compared."
             )

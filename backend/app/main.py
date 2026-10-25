@@ -16,6 +16,7 @@ from app.governance_routes import router as governance_router
 from app.payment_routes import router as payment_router
 from app.payment_store import initialize_database
 from app.persistent_budget_service import initialize_budget_database
+from app.purchase_request_routes import router as purchase_request_router
 from app.task_routes import router as task_router
 
 load_dotenv()
@@ -45,6 +46,7 @@ for route in governance_router.routes:
 
 # Developer 4 shared task, budget, event, and approval routes.
 app.include_router(router)
+app.include_router(purchase_request_router)
 
 # Developer 2 payment/governance routes are namespaced under /api.
 app.include_router(payment_router)

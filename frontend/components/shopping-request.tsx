@@ -21,21 +21,23 @@ import { cn } from "cn";
 const API_URL =
   process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8001";
 
-const TRAITS = [
-  { id: "fast-shipping", label: "Fast delivery" },
-  { id: "highly-rated", label: "Highly rated" },
-  { id: "eco-friendly", label: "Meets sustainability policy" },
-  { id: "known-brand", label: "Known vendor" },
-] as const;
+  const TRAITS = [
+    { id: "approved-vendors", label: "Approved vendors only" },
+    { id: "business-only", label: "Company purchases only" },
+    { id: "no-recurring", label: "No recurring subscriptions" },
+    { id: "verified-merchant", label: "Verified merchants only" },
+  ] as const;
 
-const STEPS = ["Requested", "Searching", "Optimizing"] as const;
+  const STEPS = ["Parsing task", "Checking policy", "Authorizing"] as const;
 
 type Phase = "idle" | "loading" | "results" | "error";
 
+type GovernanceStatus = "ALLOW" | "BLOCK" | "REVIEW";
+
 type GovernanceReview = {
-  status: string;
+  status: GovernanceStatus;
   reason: string;
-  proposed_budget_usd: string | number;
+  proposed_budget_usd: string;
   requires_human_approval: boolean;
   payment_authorized: boolean;
 };
@@ -244,26 +246,32 @@ export function ShoppingRequest() {
         );
       }
 
-      const review =
-        (await governanceResponse.json()) as GovernanceReview;
-
+      const rawReview = (await governanceResponse.json()) as {
+        status: GovernanceStatus | "REVIEW_REQUIRED";
+        reason: string;
+        proposed_budget_usd: string;
+        requires_human_approval: boolean;
+        payment_authorized: boolean;
+      };
+      
+      const review: GovernanceReview = {
+        ...rawReview,
+        status:
+          rawReview.status === "REVIEW_REQUIRED"
+            ? "REVIEW"
+            : rawReview.status,
+      };
+      
       if (requestVersion.current !== version) return;
-
-      if (
-        review.status !== "REVIEW_REQUIRED" ||
-        review.payment_authorized !== false ||
-        review.requires_human_approval !== true
-      ) {
+      
+      if (!["ALLOW", "BLOCK", "REVIEW"].includes(review.status)) {
         throw new Error("Unexpected governance review response.");
       }
-
-      const reviewedBudget = Number(review.proposed_budget_usd);
-
-      if (
-        !Number.isFinite(reviewedBudget) ||
-        Math.abs(reviewedBudget - amount) > 0.001
-      ) {
-        throw new Error("Governance returned a mismatched budget.");
+      
+      if (review.payment_authorized !== false) {
+        throw new Error(
+          "Governance review cannot independently authorize payment.",
+        );
       }
 
       clearTimers();
@@ -309,8 +317,8 @@ export function ShoppingRequest() {
           <CardHeader>
             <CardTitle>Request for the agent</CardTitle>
             <CardDescription>
-              The company states the need and the rules. The agent may only
-              return options at or under the cap.
+            Define the business task and security boundaries. The agent can act
+            autonomously only within the authority granted here.
             </CardDescription>
           </CardHeader>
 
@@ -322,7 +330,7 @@ export function ShoppingRequest() {
             >
               <div className="flex flex-col gap-2">
                 <Label htmlFor="shopping-request">
-                  What does the company need?
+                What is the agent authorized to do?
                 </Label>
 
                 <Textarea
@@ -330,7 +338,7 @@ export function ShoppingRequest() {
                   name="request"
                   rows={4}
                   value={request}
-                  placeholder="Purchase 5 noise-cancelling headsets for the support team, delivered by October 30, 2026"
+                  placeholder="Describe the business task the agent should complete..."
                   aria-invalid={requestInvalid || undefined}
                   aria-describedby={
                     error ? "shopping-error" : undefined
@@ -341,8 +349,9 @@ export function ShoppingRequest() {
               </div>
 
               <div className="flex flex-col gap-2">
-                <Label htmlFor="shopping-budget">Budget cap</Label>
-
+              <Label htmlFor="shopping-budget">
+                Maximum spending authority
+              </Label>
                 <div className="relative max-w-xs">
                   <span className="pointer-events-none absolute top-1/2 left-2.5 -translate-y-1/2 text-sm text-muted-foreground">
                     $
@@ -367,7 +376,7 @@ export function ShoppingRequest() {
                 </div>
 
                 <p className="text-xs text-muted-foreground">
-                  Hard limit for this request. Over-cap options are not shown.
+                Transactions above this limit are blocked by policy.
                 </p>
               </div>
 
@@ -407,7 +416,7 @@ export function ShoppingRequest() {
 
               <fieldset className="flex flex-col gap-2">
                 <legend className="text-sm font-medium">
-                  Buying rules
+                  Security guardrails
                 </legend>
 
                 <div className="flex flex-wrap gap-2">
@@ -504,15 +513,30 @@ export function ShoppingRequest() {
               <CardHeader>
                 <div className="flex flex-wrap items-center justify-between gap-3">
                   <CardTitle>Spending Governance</CardTitle>
-                  <Badge variant="secondary">
-                    Review Required
+                  <Badge
+                    variant={
+                      governance.status === "BLOCK"
+                        ? "destructive"
+                        : governance.status === "ALLOW"
+                          ? "default"
+                          : "secondary"
+                    }
+                  >
+                    {governance.status === "ALLOW"
+                      ? "Policy Passed"
+                      : governance.status === "BLOCK"
+                        ? "Blocked"
+                        : "Review Required"}
                   </Badge>
                 </div>
 
                 <CardDescription>
-                  The request passed initial validation but still
-                  requires human authorization.
-                </CardDescription>
+                {governance.status === "ALLOW"
+                  ? "This action passed the configured governance policies."
+                  : governance.status === "BLOCK"
+                    ? "SpendPilot blocked this action because it violated policy."
+                    : "This action requires human approval before it can continue."}
+              </CardDescription>
               </CardHeader>
 
               <CardContent className="flex flex-col gap-4">
@@ -533,8 +557,12 @@ export function ShoppingRequest() {
                       Approval status
                     </dt>
                     <dd className="font-medium">
-                      Human review required
-                    </dd>
+                    {governance.status === "ALLOW"
+                      ? "No review required"
+                      : governance.status === "BLOCK"
+                        ? "Blocked automatically"
+                        : "Human review required"}
+                  </dd>
                   </div>
 
                   <div>
@@ -638,13 +666,13 @@ export function ShoppingRequest() {
 
       <aside className="rounded-xl bg-card p-4 text-sm ring-1 ring-foreground/10">
         <p className="font-medium">
-          Controls on this request
+          Active guardrails
         </p>
 
         <dl className="mt-4 flex flex-col gap-3">
           <div>
             <dt className="text-muted-foreground">
-              Budget cap
+              Spending authority
             </dt>
             <dd className="font-medium">
               {capReady ? money.format(cap) : "Not set"}
@@ -660,7 +688,7 @@ export function ShoppingRequest() {
 
           <div>
             <dt className="text-muted-foreground">
-              Rules
+              Security policies
             </dt>
             <dd>
               {traits.length > 0
